@@ -11,13 +11,22 @@ __pycache__/
 /Libs/*
 !/Libs/embeds.xml
 
-# Pages fetched by Tools/sources/wowsrc.py, kept to save asking again.
-/Tools/data/wowsrc_pages/
-
-# CMaNGOS's database dump and updates, fetched by Tools/build/dungeon_quests.py.
-/Tools/data/cmangos/
-
-# The walking-map bake's packages and the game files it downloads.
-/Tools/nav/node_modules/
-/Tools/nav/.cache/
-/Tools/nav/cache/
+# The data tools live in the private NaowhForever-data repository, which overlays its Tools/ here.
+/Tools/*
+!/Tools/paths.py
+!/Tools/regression/
+!/Tools/hooks/
+/Tools/hooks/daily-pull-request.sh
+!/Tools/release/
+/Tools/release/watch_build.py
+!/Tools/build/
+/Tools/build/*
+!/Tools/build/auction_feed.py
+!/Tools/build/presets.lua
+!/Tools/build/search_index.lua
+!/Tools/tests/
+/Tools/tests/*
+!/Tools/tests/test_auction_feed.py
+!/Tools/tests/test_release.py
+!/Tools/tests/test_sync_badges.py
+/Tools/regression/test-damage-meter.lua
