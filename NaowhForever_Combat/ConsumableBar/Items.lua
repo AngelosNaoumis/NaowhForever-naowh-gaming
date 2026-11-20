@@ -69,6 +69,7 @@ function CB.Category(itemID)
     if D.WEAPON[itemID] then return "weapon" end
     if CB.Has(ns.HEALTHSTONES, itemID) then return "healthstone" end
     if D.OTHER[itemID] then return "other" end
+    if D.RUNES[itemID] then return "potion" end
     local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(itemID)
     if classID == C.TRADE_GOODS_CLASS then return D.TRADE_GOODS[subclassID] end
     if classID ~= C.CONSUMABLE_CLASS then return nil end
@@ -89,7 +90,7 @@ function CB.CoveredBy(itemID)
 end
 
 function CB.ManaOnly(itemID)
-    return not ns.UsesMana() and (CB.Has(ns.MANA_POTIONS, itemID) or ns.IsDrink(itemID))
+    return not ns.UsesMana() and (CB.Has(ns.MANA_POTIONS, itemID) or D.RUNES[itemID] == true or ns.IsDrink(itemID))
 end
 
 function CB.Wanted(itemID)

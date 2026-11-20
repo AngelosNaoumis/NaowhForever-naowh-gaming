@@ -88,6 +88,8 @@ NaowhForever_Combat/ConsumableBar/
   (`UI.SetMoverGrow`), which then holds the edge it grows from. A dock saved before that held the
   bar's middle, so it is moved once to the edge of the bar with every item shown, in the saved
   layouts too (`consumableBarDockHeld`); `HELD` matches the HUD Editor's own held edges.
+- Demonic Rune and Dark Rune (`RUNES`) count as Potions: the game files them as Trade Goods,
+  Other, though they are used for mana like a potion. A class without mana is not offered them.
 - Other Consumables are off in the scan filters by default: the game files quest items, holiday
   items and the like there, and Scan Bags would fill the bar with them.
 - Remove Empty takes off the items you have none of in your bags; Smart Macros stay, since they

@@ -40,6 +40,8 @@ local KNOWN = {
     [21023] = { 134021, 0, 24869, 5 }, -- Dirge's Kickin' Chimaerok Chops: eating, then Well Fed
     [17202] = { 132387, 0, 21343, 8 }, -- Snowball, Other Consumables
     [5514] = { 134104, 4, 5405, 0 },  -- Mana Agate, filed as Armor, Miscellaneous
+    [12662] = { 134417, 7, 16666, 11 }, -- Demonic Rune, filed as Trade Goods, Other
+    [20520] = { 136192, 7, 27869, 11 }, -- Dark Rune, filed as Trade Goods, Other
 }
 
 -- Food and drink by the spell they cast, as Shared/Game/Consumables.lua reads them.
@@ -909,6 +911,13 @@ do
     check('explosives and devices count, filed as Trade Goods', cat(s, 18641) == 'explosive'
         and cat(s, 10587) == 'device')
     check('other Trade Goods do not', cat(s, 4359) == nil)
+    check('Demonic and Dark Runes are potions, though the game files them as Trade Goods',
+        cat(s, 12662) == 'potion' and cat(s, 20520) == 'potion')
+    local caster = fixture({ consumableBar = true })
+    caster.bags[0] = { 12662, 20520 }
+    caster.CB.ScanBags()
+    check('and Scan Bags adds them for a class with mana',
+        table.concat(caster.settings.consumableBarItems or {}, ',') == '12662,20520')
     s.bags[0] = { 13446, 2862, 8932, 5509, 2589 }
     s.set('consumableBarSkip', { food = true, weapon = true })
     s.CB.ScanBags()
@@ -2071,9 +2080,9 @@ end
 -- No mana: no NF Mana, and no drinks or mana potions offered
 do
     local s = fixture({ consumableBar = true }, false, 'WARRIOR')
-    s.bags[0] = { 8766, 13444, 13446 }
+    s.bags[0] = { 8766, 13444, 13446, 12662, 20520 }
     s.CB.ScanBags()
-    check('Scan Bags skips drinks and mana potions', table.concat(s.settings.consumableBarItems, ',') == '13446')
+    check('Scan Bags skips drinks, mana potions and runes', table.concat(s.settings.consumableBarItems, ',') == '13446')
     check('a tea needs mana too', s.CB.ManaOnly(249866) and not s.CB.ManaOnly(13446))
     local box = s.editor()
     s.cursor = { 'item', 8766 }

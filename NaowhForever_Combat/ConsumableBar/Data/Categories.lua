@@ -14,6 +14,7 @@ CB.Data = {
     TRADE_GOODS = { [2] = "explosive", [3] = "device" },
     -- Mana Agate is filed as Armor, Miscellaneous; the other Mana Gems are Consumables.
     OTHER = { [5514] = true },
+    RUNES = { [12662] = true, [20520] = true },
     WEAPON = {
         [2862] = true, [2863] = true, [2871] = true, [7964] = true, [12404] = true, [18262] = true,
         [23122] = true,

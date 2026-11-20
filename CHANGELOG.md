@@ -5,6 +5,7 @@
 ### Fixed
 - Market: gear is priced to the copper, so Sell can match a listing like 2s 55c instead of dropping
   to 2s.
+- Consumable Bar: Demonic Rune and Dark Rune can go on the bar, filed under Potions.
 
 ## 1.4.2
 
