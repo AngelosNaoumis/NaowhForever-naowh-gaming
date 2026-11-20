@@ -104,11 +104,6 @@ function D.PerfAdd(name)
     perf[name] = (perf[name] or 0) + 1
 end
 
--- Settings read during one bag scan or one popup paint. Both read the same few options
--- many times, so each key is read from S.Get once and remembered until that scan or
--- paint ends, error or not. Outside them, and for every click-time check, Opt is a
--- plain S.Get, so a change between scans or paints is always seen. Nothing here
--- outlives the scan or paint that filled it.
 local NONE = {}
 local memo = {}
 D.scanOpts = memo
@@ -133,8 +128,6 @@ function D.On()
     return S.Get("enabled") and S.Get("destroyCheapest")
 end
 
--- This client reports the dedicated reagent bag as family 0, the same number as a
--- plain bag. EllesmereUI bags treat index 5 as that bag. Family cannot classify it.
 function D.ReagentBagIndex()
     local index = Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag
     if type(index) == "number" and not (issecretvalue and issecretvalue(index)) then
@@ -152,9 +145,6 @@ function D.IsPlain(bag)
     if D.IsReagentBag(bag) then return false end
     local _, family = GetContainerNumFreeSlots(bag)
     if issecretvalue and issecretvalue(family) then return true end
-    -- A missing family is not the reagent bag. Bags 2-4 in the live trace
-    -- reported nil and are ordinary slots. A free slot there still counts,
-    -- so the popup stays closed when ordinary room exists.
     return family == nil or family == PLAIN
 end
 
@@ -178,17 +168,12 @@ function D.ReagentFree()
     return n
 end
 
--- A secret error string cannot be compared with ERR_INV_FULL. While a loot is
--- already in progress and every plain bag is full, that error is what blocked it.
 local function SameText(value, constant)
     if type(constant) ~= "string" or type(value) ~= "string" then return false end
     if issecretvalue and (issecretvalue(value) or issecretvalue(constant)) then return false end
     return value == constant
 end
 
--- This client delivers UI_ERROR_MESSAGE as a numeric type plus text.
--- GetGameMessageInfo(type) is the name, for example ERR_INV_FULL. The text
--- itself can differ from the global or be unreadable.
 function D.ErrorName(a, b)
     if type(GetGameMessageInfo) ~= "function" then return nil end
     local function one(value)
@@ -215,7 +200,6 @@ function D.LootShown()
     return LootFrame:IsShown()
 end
 
--- Hide Loot Window leaves LootFrame shown at scale 0.001. That is not a place to anchor.
 function D.LootVisible()
     if not D.LootShown() then return false end
     if not (LootFrame and LootFrame.GetEffectiveScale) then return true end
@@ -245,7 +229,6 @@ function D.LootRecent()
     return now >= at and (now - at) <= 3
 end
 
--- nil means the error may open the popup. Any other string is the reason it will not.
 function D.WhyNotOpen(a, b)
     if not D.On() then return "feature-off" end
     if D.pending then return "pending" end
@@ -330,7 +313,6 @@ function D.Coin(copper)
     if coins then return coins(copper) end
     return tostring(copper)
 end
-
 
 local TEXT = D.TEXT
 
@@ -432,7 +414,6 @@ function D.CompareGaps(pick, loot)
     return out
 end
 
--- The rank-basis note added to a status line while Rank by Market is on.
 local function StatusSuffix(pick, loot)
     if D.Opt("destroyCheapestMarketRank") ~= true or type(D.ItemValue) ~= "function" then return "" end
     local _, ps = D.ItemValue(pick)

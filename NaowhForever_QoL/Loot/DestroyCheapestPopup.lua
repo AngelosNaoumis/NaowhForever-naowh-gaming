@@ -21,8 +21,7 @@ local FONT_CAPTION, FONT_NOTE, FONT_NAME = 10, 11, 12
 local CARD_INSET, PAGER_PAD, NAME_DROP, NAME_NUDGE, LINE_GAP = 2, 4, 4, 2, 1
 local FONT_PRICE, LABEL_W, COL_W, PRICE_ROW = 10, 84, 88, 14
 local COMPARE_H, CMP_LABEL, CMP_COL = 46, 156, 160
-local GOOD = { r = 0.18, g = 0.78, b = 0.28 }
-local BAD = { r = 0.86, g = 0.22, b = 0.2 }
+local GOOD, BAD = St.HAVE_RGB, St.RED_RGB
 local PASS_ICON = "Interface\\Buttons\\UI-GroupLoot-Pass-Up"
 local PASS_GLOW = "Interface\\Buttons\\UI-GroupLoot-Pass-Highlight"
 local HOME_Y, OVER_LOOT = 140, 20
@@ -151,10 +150,7 @@ local function StepLoot(delta)
     D.lootIndex = D.lootIndex + delta
     if D.lootIndex < 1 then D.lootIndex = #D.loots end
     if D.lootIndex > #D.loots then D.lootIndex = 1 end
-    -- A confirmation was against the other loot row. Start again.
     D.armed = false
-    -- Whether a reagent-bag item may be offered depends on the shown loot, so the
-    -- candidate list is rebuilt for it. Otherwise a repaint is enough.
     if S.Get("destroyCheapestReagentBag") == true then
         D.Refresh()
         return
@@ -579,8 +575,6 @@ local function FitCards(showLoot)
     destroyCard:SetWidth(POPUP_W - PAD * 2)
 end
 
--- An arm stands only while the shown item and loot are exactly what was confirmed
--- (see D.ArmedStill in DestroyCheapestDestroy.lua).
 local function RememberArmed(pick, loot)
     if D.armed and D.ArmedStill and D.ArmedStill(pick, loot) then return end
     if D.Disarm then D.Disarm() else D.armed = false end
@@ -616,8 +610,6 @@ end
 local function PaintNow()
     local pick, loot = D.picks[D.index], D.loots[D.lootIndex]
     RememberArmed(pick, loot)
-    -- Price what this paint shows before the unchanged-paint check, so that check and
-    -- the cards compare the same numbers.
     if D.EnsureMarket then
         D.EnsureMarket(pick)
         D.EnsureMarket(loot)
@@ -672,8 +664,6 @@ local function PaintNow()
     Layout(noteText, showButton, showAnyway, showCompare)
 end
 
--- One paint reads each setting once (see D.Opt). The memo is forgotten when the paint
--- ends, error or not, so the next paint and any click see live settings.
 function D.Paint()
     if not popup then return end
     if D.painting or D.scanning then return PaintNow() end
@@ -872,8 +862,6 @@ local function Show(fromFull)
     if not was then Place() end
     if not SavedPos() and not D.dragging and not D.LootVisible() then Place(true) end
     popup:Show()
-    -- The open paints now. A load or bag event raised by this same open must not
-    -- enter Refresh and hide the frame before it has been shown.
     D.opening = true
     local ok, err = pcall(function()
         local pass = 0
@@ -897,9 +885,6 @@ local function Show(fromFull)
     end
 end
 
--- The registered set depends only on these three facts. Every refresh calls Listen,
--- so an unchanged set is left as it is instead of being torn down and rebuilt.
--- D.watch is registered and unregistered nowhere else.
 function D.Listen(open)
     local on, wide, held = D.On() and true or false, (open or D.pending) and true or false, D.held and true or false
     local key = (on and 4 or 0) + (wide and 2 or 0) + (held and 1 or 0)
@@ -938,8 +923,6 @@ local function OnEvent(_, event, a, b)
     end
     if event == "LOOT_OPENED" or event == "LOOT_READY" then
         D.NoteLoot()
-        -- Capture before the bags-full error. The popup may not exist yet, and
-        -- these events do not fire again after that error.
         if D.pending or not D.Opened() then
             if not D.pending then D.ReadLoot() end
             return
@@ -1201,48 +1184,48 @@ Settings.Page("QoL/Loot & Items", S):Card({
         { key = "destroyCheapestHeirloom", label = "Heirloom", toggle = true,
           help = "Offers heirloom items." },
         { key = "destroyCheapestConsumable", label = "Consumables", toggle = true,
-          help = "Also offers consumables a vendor will not buy. Ones with a vendor price are offered anyway. When a zero-vendor consumable has a positive auction estimate, Destroy Anyway and the usual second click are required. With no auction estimate the offer stays as before." },
+          help = "Also offers consumables a vendor will not buy." },
         { key = "destroyCheapestZeroVendor", label = "Include Zero-Vendor-Value Items", toggle = true,
-          help = "Also offers other items a vendor pays nothing for, when their quality is on. Quest items, recipes, tools, set pieces and BiS stay protected. Consumables already do this while Consumables is on." },
+          help = "Also offers other items a vendor pays nothing for." },
         { key = "destroyCheapestBoundGear", label = "Include Bound Armor and Weapons", toggle = true,
-          help = "Also offers soulbound armor and weapons of the qualities that are on. They stay out while this is off, which is why a bound poor or uncommon chest can be missing. Equipment sets, BiS and quest items stay protected." },
+          help = "Also offers soulbound armor and weapons." },
         { key = "destroyCheapestAll", label = "All Items", toggle = true,
-          help = "Skips the quality switches, the zero-vendor rule and the plain-bag limit. Quest items, recipes, tools, keys, ammo, equipment sets, BiS, library books and bound armor stay protected. Include Bound Armor and Weapons is a separate choice. The ignore list still applies." },
+          help = "Offers any quality from any bag, but keeps protected and ignored items." },
         Settings.Group("Popup"),
         { key = "destroyCheapestSide", label = "Beside the Loot Window", choice = SIDES,
           help = "Where the popup sits beside the loot window, until you drag it." },
         { key = "destroyCheapestMovable", label = "Movable", toggle = true,
           help = "Drag the popup, and keep that place until you reset it." },
         { key = "destroyCheapestAnyway", label = "Destroy Anyway", toggle = true,
-          help = "When the loot is worth less, its price is unknown or zero, or a consumable has no vendor value but a positive auction estimate, a smaller button can still destroy the item. It still takes the usual second click." },
+          help = "Adds a smaller button that destroys even when the loot is worth less or unknown." },
         { label = "Reset Position", button = ResetPosition, buttonText = "Reset", always = true,
           help = "Clears a dragged place and uses Beside the Loot Window again." },
         Settings.Group("Prices"),
         { key = "destroyCheapestDurability", label = "Estimate Worn Vendor Price", toggle = true,
-          help = "Off by default. While on, damaged weapons and armor use floor(full vendor price * current durability / max durability). The card says Vendor est. This is not a confirmed merchant rule and it is not checked against the tooltip. While off, damaged gear keeps the full template price and is not ranked cheaper." },
+          help = "Lowers the vendor price of damaged weapons and armor by their durability." },
         { key = "destroyCheapestMarket", label = "Market Prices", toggle = true,
           help = "Shows the auction house price next to the vendor price when one is known." },
         { key = "destroyCheapestMarketRank", label = "Rank by Market Value", toggle = true,
-          help = "While on, a fresh auction estimate ranks that item. A missing or old auction estimate falls back to the vendor price for that item only. The auction column stays unavailable and is not shown as that vendor price. Unknown is not treated as zero. While off, ranking uses the vendor price." },
+          help = "Ranks items by their auction price instead of their vendor price." },
         { key = "destroyCheapestRankQty", label = "Rank Quantity", choice = {
             { batch = "Batch (stack)", unit = "Individual (unit)" },
             { "batch", "unit" },
           },
-          help = "Batch ranks the whole stack. Individual ranks one item. Vendor and auction ranking both use it, on the incoming loot and on the item that would be destroyed. Batch is the default. The cards still show one item and the stack when the quantity is above one. That display does not choose which item is destroyed." },
+          help = "Ranks by the whole stack or by one item." },
         { key = "destroyCheapestReagentBag", label = "Reagent Bag When Full", toggle = true,
-          help = "Off by default. While on, a full reagent bag can offer one of its reagents when the incoming item is a reagent and ordinary bags are already full. A free reagent slot is not ordinary room. Non-reagent loot never offers a reagent-bag item. The cheapest eligible item still wins, including one from an ordinary bag." },
+          help = "Can offer a reagent from a full reagent bag when the loot is a reagent." },
         { key = "destroyCheapestMarketStale", label = "Ignore Old Scans", toggle = true,
           help = "An auction price older than Older Than is left out, and the vendor price is used." },
         { key = "destroyCheapestMarketDays", label = "Older Than (days)", slider = D.STALE_RANGE,
           needs = "destroyCheapestMarketStale",
           help = "How many days an auction price can be before it is left out." },
         { label = "Trace Bags", button = D.TraceBags, buttonText = "Trace", always = true,
-          help = "Prints one line per bag slot: item, quality, count, vendor source, auction estimate, link, bound flag, raw slot quality, and why it was skipped. Nothing is deleted, and the bags do not have to be full. Printing stops at 100 lines." },
+          help = "Prints every bag slot and why it is or is not offered, without destroying anything." },
         Settings.Group("Full Bags"),
         { key = "destroyCheapestTransfers", label = "Bank and Other Transfers", toggle = true,
           help = "Also opens when the bank, mail, a trade, a vendor or a quest reward will not fit." },
         Settings.Group("Ignore List"),
         { label = "Ignored Items", button = ShowIgnoreList, buttonText = "Ignore List", always = true,
-          help = "The only ignore list for this popup. Ignore Item adds the item you are looking at. The first time this loads, hearthstone, picks, knives, fishing poles and the other built-in tool ids are added here once if they are missing. Removing a row, or Clear All, does not make those tools, quest items, or bound gear destroyable. There is no second list." },
+          help = "Shows the items you told the popup never to offer." },
     },
 })

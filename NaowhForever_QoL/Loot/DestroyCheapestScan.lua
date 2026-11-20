@@ -1,9 +1,4 @@
 -- DestroyCheapestScan.lua: which bag and loot items are safe to offer, and what they are worth.
--- A candidate keeps vendorUnit and marketUnit as copper for one item, and vendorTotal,
--- marketTotal and value as copper for this stack only. value stays the vendor stack total
--- so older readers keep working. Rank Quantity chooses one item or this stack.
--- Price Display never changes that rank. Auction ranking uses a fresh auction unit
--- when one exists and the vendor unit for that same item when it does not.
 local ns = _G.NaowhForever
 
 local GetContainerItemInfo = C_Container.GetContainerItemInfo
@@ -14,9 +9,6 @@ local GetItemInfoInstant = C_Item.GetItemInfoInstant
 local D = ns.DestroyCheapest
 local S = ns.QoLSettings
 
--- InfoOf reads the sell price from the eleventh C_Item.GetItemInfo return
--- (ns.QoLConstants.SELL_PRICE), the same place Bag Space, the Loot Feed, Quest Sell Price,
--- Scrap Marker and Bag Worth read.
 local FISHING = Enum.ItemWeaponSubclass.Fishingpole
 local BIND_ON_ACQUIRE = Enum.ItemBind.OnAcquire
 local BIND_QUEST = Enum.ItemBind.Quest
@@ -62,7 +54,6 @@ local function ShowAll()
     return D.Opt("destroyCheapestAll") == true
 end
 
--- A quest id of 0 is not a quest. Lua treats 0 as true, so only a real flag or a positive id counts.
 local function QuestMarked(isQuest, questID)
     if isQuest == true then return true end
     if type(questID) == "number" and questID > 0 then return true end
@@ -111,9 +102,6 @@ local function BoundGear(classID, info, bindType)
     return bindType == BIND_ON_ACQUIRE
 end
 
--- nil means the slot may be destroyed. A reason means it stays.
--- All Items skips quality, a zero vendor price and the plain-bag limit only.
--- The ignore list, quests, recipes, keys, ammo, tools, sets, BiS and bound gear stay.
 function D.Exclusion(bag, slot, info, quality, unit, known, classID, subclassID, bindType, setID)
     if D.Ignored(info.itemID) then return "ignored" end
     if QuestSlot(bag, slot) then return "quest" end
@@ -157,8 +145,6 @@ local function StaleLimit()
     return ns.QoLConstants.SECONDS_PER_DAY * days
 end
 
--- One scan's lookups. Each cache is a set of parallel tables keyed by the same query,
--- so a hit or a miss allocates no row. All of them are wiped when the scan ends.
 local AH = { ok = {}, price = {}, age = {}, fresh = {} }
 local INFO = { name = {}, quality = {}, sell = {}, class = {}, sub = {}, bind = {}, set = {} }
 local CLASS_OF = { class = {}, sub = {} }
@@ -208,8 +194,6 @@ function D.Quote(itemID)
     return price, age, fresh
 end
 
--- One-shot. Later reloads do not put a removed id back. Clearing the list does not
--- turn off the tool, fishing, quest, or bind checks in D.Exclusion.
 function D.SeedIgnore()
     local db = S.DB()
     if type(db) ~= "table" or db.destroyCheapestIgnoreSeeded == true then return end
@@ -224,9 +208,6 @@ function D.SeedIgnore()
     db.destroyCheapestIgnoreSeeded = true
 end
 
--- C_Item.IsReagent is used when this client has it and returns a boolean.
--- Otherwise trade goods (class 7), the same class Bag Space treats as trade goods.
--- A name or a zero vendor price is not a reagent.
 function D.ItemIsReagent(itemID, classID)
     if type(itemID) == "number" and C_Item and type(C_Item.IsReagent) == "function" then
         local ok, result = pcall(C_Item.IsReagent, itemID)
@@ -276,11 +257,6 @@ function D.ApplyMarket(e, itemID, count)
     e.marketAge, e.marketFresh = age, fresh
 end
 
--- A bag candidate is quoted during the scan only when the rank needs it (Rank by
--- Market) or Trace Bags prints it. With Market Prices on for display only, the price
--- is read when something first looks at that candidate: the card, the comparison,
--- the paint check, or the zero-vendor consumable guard. The candidate is rebuilt on
--- the next scan, so an estimate never outlives it.
 local function ClearMarket(e)
     e.market, e.marketUnit, e.marketTotal = nil, nil, nil
     e.marketAge, e.marketFresh, e.marketKnown = nil, nil, false
@@ -297,8 +273,6 @@ local function RankValue(e)
     return (D.ItemValue(e))
 end
 
--- The sort calls this about n log n times, so the rank lookup is inlined:
--- e.rank when set, otherwise e.value.
 local function Cheaper(a, b)
     local ar, br = a.rank, b.rank
     if ar == nil then ar = a.value end
@@ -323,12 +297,8 @@ local function Take()
     return e
 end
 
--- The bag or loot slot's own quality wins. The item record is only a fallback
--- when the slot did not report one. The higher of the two is not used, so a
--- poor slot stays poor when the base item record says otherwise.
 local function ReadQuality(fromSlot, fromItem)
     fromSlot, fromItem = Plain(fromSlot), Plain(fromItem)
-    -- Quality 0 is poor. Lua treats 0 as false, so a numeric check has to keep it.
     if type(fromSlot) == "number" and fromSlot >= 0 then return fromSlot end
     if type(fromItem) == "number" and fromItem >= 0 then return fromItem end
 end
@@ -373,8 +343,6 @@ local function Classes(info, infoClass, infoSub)
     return classID, subclassID
 end
 
--- Opt-in only. The floor formula is not a confirmed merchant rule, so it stays off until asked
--- and the card labels it as an estimate. While off, damaged gear keeps the full template price.
 local function Worn(unit, bag, slot, classID)
     if D.Opt("destroyCheapestDurability") ~= true then return unit, false end
     if type(unit) ~= "number" or unit <= 0 or type(bag) ~= "number" then return unit, false end
@@ -402,8 +370,6 @@ local function ResolveItem(info)
         if not D.loadDone[D.LoadKey(info.itemID, link)] then
             return nil, false, "unloaded"
         end
-        -- The link was given a chance and still has no verified sell price.
-        -- A base-id price is not offered as that link's price.
         local baseName, baseQuality, _, bClass, bSub, bBind, bSet = InfoOf(info.itemID)
         local note = "unknown"
         if baseName ~= nil then note = "unknown base-id " .. tostring(info.itemID) end
@@ -417,10 +383,6 @@ local function ResolveItem(info)
     return sell, true, "item", name, quality, classID, subclassID, bindType, setID
 end
 
--- unit, known, source, name, quality, classID, subclassID, bindType, setID, estimated.
--- source is slot when the bag says the item has no vendor value, link when that hyperlink
--- loaded, or item when the slot has no link. A link is never priced from the base item id.
--- +wear-est means the opt-in durability estimate lowered the number. It is not exact.
 function D.VendorQuote(info, bag, slot)
     if info.hasNoValue == true then
         local name, quality, _, classID, subclassID, bindType, setID = InfoOf(info.hyperlink)
@@ -534,8 +496,6 @@ function D.EndCache()
     D.WipeCaches()
 end
 
--- One refresh for a burst of bag events or item-load callbacks.
--- With no timer the refresh runs now, so tests stay synchronous.
 function D.ScheduleRefresh()
     D.keepSets = false
     if D.pending then return end
@@ -921,9 +881,6 @@ local function ScanPass()
     local tracing = D.traceOn == true
     local offerReagent = D.OfferReagentBag()
     for bag = BACKPACK_CONTAINER, last do
-        -- A reagent-bag item does not free an ordinary slot, including when All Items
-        -- is on. It is offered only for an incoming reagent while that bag is full.
-        -- Profession bags stay under All Items.
         local reagent = D.IsReagentBag(bag)
         local plain = not reagent and D.IsPlain(bag)
         for slot = 1, GetContainerNumSlots(bag) or 0 do
@@ -965,8 +922,6 @@ function D.IsSecret(value)
     return issecretvalue and issecretvalue(value) and true or false
 end
 
--- This client's loot window classifies slots with Enum.LootSlotType. The global
--- LOOT_SLOT_ITEM is not part of that check. A nil global used to reject every slot.
 function D.LootCode(enumName, globalName, fallback)
     local enum = Enum and Enum.LootSlotType
     local value = type(enum) == "table" and enum[enumName] or nil
@@ -989,7 +944,6 @@ local function Bare(value)
     return value, false
 end
 
--- StackCount for a bare quantity: nil is one item, a hidden or non-positive one is nil.
 local function StackOf(qty)
     if qty == nil then return 1 end
     local n = Plain(qty)
@@ -997,9 +951,6 @@ local function StackOf(qty)
     return math.floor(n)
 end
 
--- One loot slot. item means the slot was identified. A reason and no item means
--- it was money, currency, empty, or not reliable enough to name. A new table is
--- returned unless the caller passes one to fill.
 function D.LootSlotFact(i, into)
     local has, hasSecret
     if type(LootSlotHasItem) == "function" then
@@ -1070,8 +1021,6 @@ function D.LootSlotFact(i, into)
         if ok and type(class) == "number" and not D.IsSecret(class) then classID = class end
     end
     local count = StackOf(qty) or 1
-    -- into is a caller's scratch table that is read at once and not kept. Every field
-    -- is written, so nothing from an earlier slot survives in it.
     local fact = into or {}
     fact.item, fact.slot, fact.link, fact.icon, fact.name = true, i, link, texture, name
     fact.itemID, fact.classID, fact.count, fact.quality = itemID, classID, count, quality
@@ -1215,7 +1164,6 @@ local function Verdict(_, reason)
     D.lootHideReason = reason
 end
 
--- Restores the rows read before this pass when the new read could not be trusted.
 local function PutBack(copy, keepIndex)
     for i = #D.loots, 1, -1 do D.loots[i] = nil end
     D.lootUsed = 0
@@ -1315,7 +1263,6 @@ function D.HoldForAnyway(pick)
     if type(pick) ~= "table" then return false end
     if pick.classID ~= CLASS.CONSUMABLE then return false end
     if pick.vendorKnown ~= true or type(pick.vendorUnit) ~= "number" or pick.vendorUnit > 0 then return false end
-    -- The scan can leave a display-only price unread. This guard must see it.
     D.EnsureMarket(pick)
     if pick.marketKnown ~= true or type(pick.market) ~= "number" or pick.market <= 0 then return false end
     return true
@@ -1350,13 +1297,9 @@ function D.Matches(pick)
     if type(pick) ~= "table" then return false end
     local info = GetContainerItemInfo(pick.bag, pick.slot)
     if not info or info.isLocked or info.itemID ~= pick.itemID then return false end
-    -- A candidate seen with a link needs that same link now. A missing link is a change.
     if pick.link and info.hyperlink ~= pick.link then return false end
     local count = StackCount(info)
     if count ~= pick.count then return false end
-    -- The bag must still be one the scan may offer from. A reagent-bag item is only for
-    -- an incoming reagent while ordinary bags and the reagent bag are full, and a
-    -- profession bag only while All Items is on.
     if D.IsReagentBag(pick.bag) then
         if not D.OfferReagentBag() then return false end
     elseif not D.IsPlain(pick.bag) and S.Get("destroyCheapestAll") ~= true then

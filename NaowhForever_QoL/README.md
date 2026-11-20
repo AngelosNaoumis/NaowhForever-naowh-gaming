@@ -1200,6 +1200,46 @@ NaowhForever_QoL/
   window moves. Dragging is off until Movable is on. A dragged place is kept with the profile
   until Reset Position, and it wins over the side until then. While a transfer or a delete keeps
   an undragged popup up with no loot window, it sits in the middle of the screen.
+- How the code holds this together:
+  - A candidate keeps `vendorUnit` and `marketUnit` as copper for one item, and `vendorTotal`,
+    `marketTotal` and `value` for that stack. `value` stays the vendor stack total, so the delete
+    message and older readers keep working. Rank Quantity only chooses which one ranks.
+  - The sell price is the eleventh `C_Item.GetItemInfo` return (`ns.QoLConstants.SELL_PRICE`), the
+    same place Bag Space, the Loot Feed and Scrap Marker read. A link is never priced from its base
+    item id: an unloaded link gets a few load attempts, and a link that still has no price is not offered.
+  - Lua treats 0 as true, so a quest id of 0 is not a quest and quality 0 (poor) is kept with a
+    numeric test. The slot's own quality wins over the item record, so a poor slot stays poor.
+  - This client reports the reagent bag as family 0, like a plain bag, so it is found by its index
+    (5, as EllesmereUI bags also treat it). A bag that reports no family is ordinary room.
+    `C_Item.IsReagent` decides what a reagent is when the client has it; trade goods otherwise.
+  - `UI_ERROR_MESSAGE` arrives as a message type plus text. `GetGameMessageInfo` names the type
+    (`ERR_INV_FULL`, `ERR_BAG_FULL`), because the text can differ from the global or be secret. A
+    secret error during a loot with every plain bag full is the error that blocked that loot.
+  - Loot slots are classified with `Enum.LootSlotType`; the old `LOOT_SLOT_ITEM` global can be nil
+    and would reject every slot. The loot is read at `LOOT_OPENED` and `LOOT_READY`, before the
+    bags-full error, because neither fires again after it. Hide Loot Window leaves `LootFrame`
+    shown at scale 0.001, which is not used as an anchor.
+  - The open paints before any refresh it raises, so a load or bag event from that same open
+    cannot hide the popup before it is seen. Bag events and item-load callbacks that arrive
+    together share one refresh on the next frame; with no `C_Timer` (the offline tests) it runs at once.
+  - A scan or a paint reads each setting once and forgets it when it ends, error or not. Every
+    click-time check reads live settings. The item, class and auction lookups of one scan are kept
+    in field tables keyed by the link or id, so a hit makes no garbage, and they are emptied when
+    the scan ends.
+  - With Market Prices on and Rank by Market off, a bag candidate's auction price is read the first
+    time the card, the comparison, the paint check or the zero-vendor consumable guard looks at it.
+    Paint prices the shown item before it decides whether anything changed, and the guard prices it
+    itself, so a refresh can never hide an auction estimate from it.
+  - The first click arms that slot, item, stack size and link, against that incoming row, on that
+    button (`D.ArmedStill`). The second click re-reads the slot with live settings, including
+    whether its bag may still be offered for the shown loot, before the game's own delete runs.
+  - Event registration depends only on three facts: the feature is on, the popup is open or a
+    delete is waiting, and a cursor item is held through combat. It is rebuilt only when one of them
+    changes, because every refresh asks for it.
+  - The reagent-bag check reads one loot slot into a reused table, which is filled completely each
+    time, so a scan with that option on makes no garbage. The sort compares `rank` (or `value`) inline.
+  - The tool ids are seeded onto the ignore list once. A removed id is not put back, and clearing the
+    list does not turn off the tool, fishing, quest or bind checks.
 
 ### Trainer
 - Closing a non-profession trainer checks the current spellbook for lower ranks even without a learned-ability notification. The trainer type is captured while its window is open. A fresh visit drops the previous popup list; kept-only rank offers stay silent automatically but remain available through Check Bars. Combat deferral is unchanged.

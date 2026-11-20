@@ -105,9 +105,6 @@ function D.Resolve()
     GiveUp()
 end
 
--- The first click confirms one thing: this bag slot holding this item, stack size and
--- link, compared against this incoming loot row. If any of that changes, the arm no
--- longer stands and the next click is a new first click.
 function D.ArmedStill(pick, loot)
     if not (D.armed and type(pick) == "table") then return false end
     if pick.bag ~= D.armedBag or pick.slot ~= D.armedSlot or pick.itemID ~= D.armedID then return false end
@@ -123,8 +120,6 @@ function D.Disarm()
     D.armedLootSlot, D.armedLootLink, D.armedForced = nil, nil, nil
 end
 
--- The second click must also be on the same button: Destroy Anyway does not complete
--- an arm made with Destroy & Loot, or the other way round.
 local function SameArmed(pick, loot, forced)
     return D.ArmedStill(pick, loot) and (forced == true) == (D.armedForced == true)
 end
