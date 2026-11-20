@@ -165,7 +165,7 @@ local function Default(entry)
 end
 
 function Sell.Copper(entry)
-    return entry.commodity and C_AuctionHouse.SupportsCopperValues()
+    return C_AuctionHouse.SupportsCopperValues()
 end
 
 function Sell.Read()

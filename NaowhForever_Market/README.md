@@ -274,18 +274,19 @@ NaowhForever_Market/
   right-click in your bags, and posted. Bag Worth and tooltips never read the marks.
 - The price steps a copper, or a silver where `C_AuctionHouse.SupportsCopperValues()` is false, and is
   never under one step. Your own cheapest listing is matched, never undercut.
-- Only commodities take copper. Forever's `SupportsCopperValues()` is true, but posts from The Market,
-  which undercut by a copper, got "Internal auction error" while the same items posted from Blizzard's
-  sell frame, which prices in silver ("AH prices must be in silver increments"). So an item that is not
-  a commodity steps a silver and its price box has no copper.
+- Items take copper as commodities do. From 2026-11-09 (#1009) to 2026-11-20 items were kept to whole
+  silver after a report of "Internal auction error" on gear, but that cause was never reproduced: Blizzard's
+  Forever item sell frame shows copper and posts the price as typed, and gear is listed at prices like
+  2s 55c (Rokun, 2026-11-19). Blizzard's "AH prices must be in silver increments" comment is only on its
+  default price. Without copper on the auction house everything still steps a silver.
 - Selling's Undercut sets how far under the cheapest listing that is not yours the price goes: nothing
-  (Match the Cheapest, the default), a step (Smallest Step), a silver (One Silver: 100 copper on a commodity,
-  the same as a step on an item), a percent or a fixed amount. Up and Down step to the same distance under each
+  (Match the Cheapest, the default), a step (Smallest Step), a silver (One Silver: 100 copper, the same
+  as a step where the auction house takes no copper), a percent or a fixed amount. Up and Down step to the same distance under each
   listing; one that is all yours is matched. A price that lands on the cheapest listing, chosen or
   because a step under it would go under one step, says it matches.
-- Match the Cheapest on an item whose cheapest listing is not on whole silver (2s 15c) goes down to the
-  silver (2s), the nearest price the item can post at that is not over it, and the line under the price
-  says items post in whole silver rather than calling it an undercut (Blaksheep, 2026-11-16).
+- Where the auction house takes no copper, Match the Cheapest on a listing that is not on whole silver
+  (2s 15c) goes down to the silver (2s), the nearest price that can post and is not over it, and the line
+  under the price says items post in whole silver rather than calling it an undercut (Blaksheep, 2026-11-16).
 - Match the Cheapest became the default on 2026-11-18, as undercutting is heard not to matter on Forever's
   auction house (totkeks). Smallest Step was the default before; a choice you saved is kept.
 - The price The Market suggests passes over a few listings far under the rest, as people often list one
@@ -297,10 +298,10 @@ NaowhForever_Market/
 - Percent goes Undercut Percent (`undercutPercent`, 1 to 50, 5 until changed) of each listing's own price
   under it, rounded down, and never less than one step; Fixed Amount goes Undercut Amount
   (`undercutAmount`, saved in copper, set in whole silver from 1 to 500) under it. Both go through the same
-  rounding as the other choices, down to the item's step, so an item that is not a commodity stays on
-  whole silver and no price goes under one step; your own cheapest listing is still matched.
-- Starting Bid (`startingBid`, off) adds a bid box to Sell for an item that is not a commodity, with no
-  copper, as its price box has none. It is the bid for one item, `PostItem`'s fourth argument, before the
+  rounding as the other choices, down to the item's step, so no price goes under one step; your own
+  cheapest listing is still matched.
+- Starting Bid (`startingBid`, off) adds a bid box to Sell for an item that is not a commodity, with
+  copper when its price box has it. It is the bid for one item, `PostItem`'s fourth argument, before the
   buyout, and the same bid answers the game's own confirm (`ConfirmPostItem`). Blank or zero posts a buyout
   only, as before; a commodity has no bid (`PostCommodity` takes none). The bid has to be under the price:
   Blizzard's sell frame refuses a buyout at or under the bid, so Post is greyed and the line under it reads
@@ -322,10 +323,10 @@ NaowhForever_Market/
   less of Up Next. The row shows only for an item with a past post, and the top part grows by it.
 - The bid box is a row of its own between the price and the duration, shown only while it applies, and
   Sell's top part grows by that row: beside the price, the quantity and its "of N" there are under 100 of
-  the panel's 360 pixels left, and the box is 112 wide.
+  the panel's 360 pixels left, and the box is 160 wide.
 - With no listings and no scan price, an item is priced at its vendor price times
-  `DEFAULT_AUCTION_PRICE_MULTIPLIER`, to the copper on a commodity and down to a whole silver on anything
-  else. Blizzard's sell frame rounds that up to a silver; no price of ours is rounded up.
+  `DEFAULT_AUCTION_PRICE_MULTIPLIER`, to the copper. Blizzard's sell frame rounds that up to a silver; no
+  price of ours is rounded up.
 - Prices and totals on Sell, My Auctions and Bag Worth are shown to the copper. Only Farm's "about ... an
   hour" rates, which are estimates, are rounded to their largest coin.
 - An item is the vendor's when a vendor pays at least what it makes on the auction house after the 5%
@@ -736,7 +737,7 @@ NaowhForever_Market/
   so a price equal to a listing's lands after it, as the auction house sells the older auction first. It
   moves with every price typed, stepped or taken.
 - A click on a row takes its price as a price set by hand (`Sell.TakePrice`), so Ask Before a Bad Post
-  weighs it; an item that is not a commodity is taken down to a whole silver.
+  weighs it.
 - Buy and Cancel are small buttons shown on the row under the mouse, made the first time a row is hovered:
   nothing is hidden behind a right-click, and the row's tooltip says what each does. A row of a price you
   share with others shows both.
@@ -911,8 +912,8 @@ In game, at an auctioneer, with The Market on:
 11. Cancel asks first and cancels; Cancel Undercut cancels one per press; the list reads again.
 12. Sell and My Auctions show their counts on their tabs; My Auctions turns orange when one is undercut. Buy shows,
     in green, how many watched items are at or under your price.
-13. A piece of gear on Sell, with someone else's listed, is priced a whole silver under theirs and its
-    price box has no copper; it posts without "Internal auction error". A commodity still steps a copper.
+13. A piece of gear on Sell, with someone else's listed at 2s 55c, has a copper box and, on Match the
+    Cheapest, is priced at 2s 55c; it posts, and Blizzard's Auctions tab lists it at 2s 55c.
 14. Set Selling's Undercut to Match the Cheapest: Sell prices at the cheapest listing that is not yours
     and says it matches it. One Silver puts a commodity a silver under, and gear a silver under as before.
 15. The panel fits the auction house's height at your UI scale, with Up Next showing several items.
@@ -1032,11 +1033,11 @@ Back at an auctioneer, on Sell:
     Hidden (1) appears at the bottom. Clicking Hidden lists it; its right-click has Show in Sell, which
     puts it back. Bag Worth and the item's tooltip read the same as before it was hidden.
 66. Set Selling's Undercut to Percent: Undercut Percent lights up (Undercut Amount stays dimmed and says
-    what it needs), and at 10 a commodity with a cheapest listing of 1g is priced at 90s. Gear is priced on
-    whole silver, 10% or a little more under. With your own listing the cheapest, it still matches yours.
+    what it needs), and at 10 a commodity with a cheapest listing of 1g is priced at 90s, and gear 10% under
+    to the copper. With your own listing the cheapest, it still matches yours.
 67. Fixed Amount with Undercut Amount at 5s: the same commodity is priced at 95s, gear 5s under.
 68. Turn on Starting Bid: a piece of gear on Sell shows a Starting Bid row between the price and the
-    duration, with gold and silver only, and every control still fits the panel; a commodity shows no
+    duration, with gold, silver and copper, and every control still fits the panel; a commodity shows no
     such row. Post with a bid of half the price: Blizzard's Auctions tab lists the auction with that bid
     and your buyout, and no "Internal auction error". A bid at or over the price greys Post and says the
     buyout must be higher. Left blank, the post is a buyout only.

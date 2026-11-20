@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+- Market: gear is priced to the copper, so Sell can match a listing like 2s 55c instead of dropping
+  to 2s.
+
 ## 1.4.2
 
 ### Added

@@ -202,6 +202,7 @@ end
 
 local function DrawForm(entry, price)
     money:ShowCopper(Sell.Copper(entry))
+    bid:ShowCopper(Sell.Copper(entry))
     if not money:HasFocus() then money:SetAmount(price) end
     Layout(S.Get("startingBid") and not entry.commodity, Sell.PastCount(entry.itemID) > 0)
     if bidShown and not bid:HasFocus() then bid:SetAmount(Sell.Bid(entry) or 0) end
@@ -704,7 +705,6 @@ local function BuildForm()
     bidRow:SetPoint("RIGHT")
     bidRow:SetHeight(money:GetHeight())
     bid = Parts.MoneyBox(bidRow, BidTyped)
-    bid:ShowCopper(false)
     bid:SetPoint("RIGHT")
     local bidLabel = ns.Font(bidRow, SMALL_SIZE, nil, T.muted)
     bidLabel:SetPoint("LEFT")

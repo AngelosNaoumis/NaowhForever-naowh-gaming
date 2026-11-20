@@ -225,7 +225,7 @@ lines = t.Lines()
 Check("an item's auctions at one price are one row, and one with no buyout is left out", #lines == 2
     and lines[1].quantity.text == "x2" and lines[1].yours.shown)
 t.Click(lines[2])
-Check("an item's price taken stays on whole silver", (Sell.Price(Sell.Focus())) == 45000)
+Check("an item's price taken keeps its copper", (Sell.Price(Sell.Focus())) == 45050)
 t.Hover(lines[2])
 Check("its Buy names the buyout", t.tips[2] == "Buy takes this auction for 45050.")
 lines[2].buy.click()
