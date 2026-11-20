@@ -12,6 +12,7 @@ local S = ns.QoLSettings
 local FISHING = Enum.ItemWeaponSubclass.Fishingpole
 local BIND_ON_ACQUIRE = Enum.ItemBind.OnAcquire
 local BIND_QUEST = Enum.ItemBind.Quest
+local LOOT_NONE, LOOT_ITEM, LOOT_MONEY, LOOT_CURRENCY = 0, 1, 2, 3
 local CLASS = { CONSUMABLE = 0, WEAPON = 2, ARMOR = 4, PROJECTILE = 6, RECIPE = 9, QUIVER = 11, QUEST = 12, KEY = 13, TRADE = 7 }
 local KEEP_CLASS = {
     [CLASS.PROJECTILE] = true, [CLASS.RECIPE] = true,
@@ -33,6 +34,7 @@ local TOOLS = {
     [11128] = true, [11130] = true, [11144] = true, [11145] = true, [16206] = true, [16207] = true,
 }
 local TRACE_CAP = 100
+local FAIL_CAP = 2
 
 local function Plain(v)
     if issecretvalue and issecretvalue(v) then return nil end
@@ -417,7 +419,6 @@ local function StackCount(info)
     return math.floor(n)
 end
 
-local FAIL_CAP = 2
 
 local function Snapshot(t)
     local keys, n = {}, 0
@@ -532,9 +533,9 @@ end
 
 function D.FinishLoad(key)
     if type(key) ~= "string" or key == "" then return end
-    if D.IsLinkKey(key) and GetItemInfo(key:sub(3)) == nil then return end
+    if D.IsLinkKey(key) and GetItemInfo(D.KeyBody(key)) == nil then return end
     if not D.IsLinkKey(key) then
-        local itemID = tonumber(key:sub(3))
+        local itemID = tonumber(D.KeyBody(key))
         if GetItemInfo(itemID) == nil then return end
     end
     if D.loadDone[key] then
@@ -996,10 +997,10 @@ function D.LootSlotFact(i, into)
     end
     if type(link) ~= "string" or link == "" then link = nil end
     if type(name) ~= "string" or name == "" then name = nil end
-    local itemCode = D.LootCode("Item", "LOOT_SLOT_ITEM", 1)
-    local moneyCode = D.LootCode("Money", "LOOT_SLOT_MONEY", 2)
-    local currencyCode = D.LootCode("Currency", "LOOT_SLOT_CURRENCY", 3)
-    local noneCode = D.LootCode("None", "LOOT_SLOT_NONE", 0)
+    local itemCode = D.LootCode("Item", "LOOT_SLOT_ITEM", LOOT_ITEM)
+    local moneyCode = D.LootCode("Money", "LOOT_SLOT_MONEY", LOOT_MONEY)
+    local currencyCode = D.LootCode("Currency", "LOOT_SLOT_CURRENCY", LOOT_CURRENCY)
+    local noneCode = D.LootCode("None", "LOOT_SLOT_NONE", LOOT_NONE)
     local coin = isCoin == true or (not typeSecret and slotType == moneyCode)
     if coin then return nil, "money" end
     local currency = (type(currencyID) == "number" and currencyID > 0)

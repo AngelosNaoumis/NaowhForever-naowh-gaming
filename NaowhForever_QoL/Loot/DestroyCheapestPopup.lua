@@ -20,7 +20,9 @@ local PAGER_W, PAGER_H = 22, 18
 local FONT_CAPTION, FONT_NOTE, FONT_NAME = 10, 11, 12
 local CARD_INSET, PAGER_PAD, NAME_DROP, NAME_NUDGE, LINE_GAP = 2, 4, 4, 2, 1
 local FONT_PRICE, LABEL_W, COL_W, PRICE_ROW = 10, 84, 88, 14
-local COMPARE_H, CMP_LABEL, CMP_COL = 46, 156, 160
+local COMPARE_H, CMP_LABEL, CMP_COL, CMP_TOP, CMP_BOTTOM = 46, 156, 160, 4, 6
+local IGNORE_LEVEL, MAX_PASSES, PAGE_MIN = 2, 2, 2
+local SETTING_PREFIX = "destroyCheapest"
 local GOOD, BAD = St.HAVE_RGB, St.RED_RGB
 local PASS_ICON = "Interface\\Buttons\\UI-GroupLoot-Pass-Up"
 local PASS_GLOW = "Interface\\Buttons\\UI-GroupLoot-Pass-Highlight"
@@ -34,7 +36,7 @@ local ANCHOR = {
 local LIST = {
     w = 440, h = 480, row = 30, icon = 24, inset = 2, remove = 22, gap = 8,
     text = 12, head = 14, side = 16, top = 72, right = 36, bottom = 52,
-    searchY = 40, searchH = 24, buttonW = 110, buttonH = 24, buttonY = 16,
+    searchY = 40, searchH = 24, buttonW = 110, buttonH = 24, buttonY = 16, emptyRows = 2,
 }
 
 local popup, destroyCard, lootCard, note, compare, action, anywayBtn, ignorePanel, placing
@@ -137,7 +139,7 @@ function D.HookTransfers()
 end
 
 local function StepDestroy(delta)
-    if D.pending or #D.picks < 2 then return end
+    if D.pending or #D.picks < PAGE_MIN then return end
     D.armed = false
     D.index = D.index + delta
     if D.index < 1 then D.index = #D.picks end
@@ -146,7 +148,7 @@ local function StepDestroy(delta)
 end
 
 local function StepLoot(delta)
-    if D.pending or #D.loots < 2 then return end
+    if D.pending or #D.loots < PAGE_MIN then return end
     D.lootIndex = D.lootIndex + delta
     if D.lootIndex < 1 then D.lootIndex = #D.loots end
     if D.lootIndex > #D.loots then D.lootIndex = 1 end
@@ -446,13 +448,13 @@ end
 
 local function GapLabel(kind, eachDelta, stackDelta, columns)
     local left = GapWord(eachDelta)
-    local right = columns == 2 and GapWord(stackDelta) or left
+    local right = columns == D.STACK_COLUMNS and GapWord(stackDelta) or left
     if left and left == right then return kind .. " " .. left end
     return kind
 end
 
 local function FillMetric(tag, eachFs, stackFs, kind, eachDelta, stackDelta, columns, y)
-    local showStack = columns == 2
+    local showStack = columns == D.STACK_COLUMNS
     PlaceRow(compare, tag, eachFs, stackFs, y, showStack, true)
     tag:SetText(GapLabel(kind, eachDelta, stackDelta, columns))
     PaintTone(tag, "neutral")
@@ -481,8 +483,8 @@ local function FillCompare(pick, loot)
     end
     local gaps = D.CompareGaps(pick, loot)
     local columns = gaps.columns or 1
-    local y = 4
-    if columns == 2 then
+    local y = CMP_TOP
+    if columns == D.STACK_COLUMNS then
         compare.headEach:SetText(TEXT.COL_EACH)
         compare.headStack:SetText(gaps.stackLabel or TEXT.COL_STACK)
         compare.headEach:ClearAllPoints()
@@ -512,7 +514,7 @@ local function FillCompare(pick, loot)
         compare.ahEach:Hide()
         compare.ahStack:Hide()
     end
-    compare.needH = y + 6
+    compare.needH = y + CMP_BOTTOM
     if compare.needH < COMPARE_H then compare.needH = COMPARE_H end
     return true
 end
@@ -762,7 +764,7 @@ function D.Build()
     destroyCard.ignore = CreateFrame("Button", nil, destroyCard)
     destroyCard.ignore:SetSize(St.ACTION, St.ACTION)
     destroyCard.ignore:SetPoint("BOTTOMRIGHT", -(GAP - CARD_INSET), GAP - PAGER_PAD)
-    destroyCard.ignore:SetFrameLevel(destroyCard:GetFrameLevel() + 2)
+    destroyCard.ignore:SetFrameLevel(destroyCard:GetFrameLevel() + IGNORE_LEVEL)
     destroyCard.ignore:SetNormalTexture(PASS_ICON)
     destroyCard.ignore:SetHighlightTexture(PASS_GLOW, "ADD")
     destroyCard.ignore:SetScript("OnClick", OnIgnore)
@@ -818,7 +820,7 @@ function D.Refresh()
     D.PerfAdd("refreshes")
     local ok, err = pcall(function()
         local pass = 0
-        while pass < 2 do
+        while pass < MAX_PASSES do
             pass = pass + 1
             D.scanAgain = false
             D.keepSets = pass > 1
@@ -865,7 +867,7 @@ local function Show(fromFull)
     D.opening = true
     local ok, err = pcall(function()
         local pass = 0
-        while pass < 2 do
+        while pass < MAX_PASSES do
             pass = pass + 1
             D.scanAgain = false
             D.Scan()
@@ -887,9 +889,8 @@ end
 
 function D.Listen(open)
     local on, wide, held = D.On() and true or false, (open or D.pending) and true or false, D.held and true or false
-    local key = (on and 4 or 0) + (wide and 2 or 0) + (held and 1 or 0)
-    if key == D.listenKey then return end
-    D.listenKey = key
+    if D.listenSet and on == D.listenOn and wide == D.listenWide and held == D.listenHeld then return end
+    D.listenSet, D.listenOn, D.listenWide, D.listenHeld = true, on, wide, held
     local watch = D.watch
     watch:UnregisterAllEvents()
     if not on then
@@ -980,7 +981,7 @@ local function SettingChanged(key)
         Place()
         return
     end
-    if type(key) == "string" and key:sub(1, 15) == "destroyCheapest" and not D.pending then
+    if type(key) == "string" and key:sub(1, #SETTING_PREFIX) == SETTING_PREFIX and not D.pending then
         if key == "destroyCheapestTransfers" then D.HookTransfers() end
         D.Refresh()
     end
@@ -1104,7 +1105,7 @@ function D.FillIgnore()
         empty:SetWidth(LIST.w - LIST.top)
         empty:SetJustifyH("LEFT")
         empty:SetText(#items == 0 and TEXT.LIST_EMPTY or TEXT.LIST_NONE)
-        y = y - LIST.row * 2
+        y = y - LIST.row * LIST.emptyRows
     end
     content:SetHeight(math.max(1, -y))
 end

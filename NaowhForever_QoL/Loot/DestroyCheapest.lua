@@ -15,8 +15,14 @@ local TRANSFER_FRAMES = {
 }
 D.TRANSFER_FRAMES = TRANSFER_FRAMES
 
+local REAGENT_BAG_INDEX = 5
+local SHRUNK_LOOT_SCALE = 0.05
+local LOOT_RECENT_SECONDS = 3
+local LINK_KEY, ID_KEY = "l:", "i:"
+
 D.STALE_DAYS = 7
 D.STALE_RANGE = { 1, 30, 1 }
+D.STACK_COLUMNS = 2
 D.TEXT = {
     BLANK_DESTROY = ns.L("Nothing safe to destroy"),
     DESTROY = ns.L("Destroy"),
@@ -133,11 +139,11 @@ function D.ReagentBagIndex()
     if type(index) == "number" and not (issecretvalue and issecretvalue(index)) then
         return index
     end
-    return 5
+    return REAGENT_BAG_INDEX
 end
 
 function D.IsReagentBag(bag)
-    if bag == 5 then return true end
+    if bag == REAGENT_BAG_INDEX then return true end
     return bag == D.ReagentBagIndex()
 end
 
@@ -206,7 +212,7 @@ function D.LootVisible()
     local scale = LootFrame:GetEffectiveScale()
     if issecretvalue and issecretvalue(scale) then return true end
     if type(scale) ~= "number" then return true end
-    return scale >= 0.05
+    return scale >= SHRUNK_LOOT_SCALE
 end
 
 function D.LootLive()
@@ -226,7 +232,7 @@ function D.LootRecent()
     if type(at) ~= "number" or not GetTime then return false end
     local now = GetTime()
     if type(now) ~= "number" then return false end
-    return now >= at and (now - at) <= 3
+    return now >= at and (now - at) <= LOOT_RECENT_SECONDS
 end
 
 function D.WhyNotOpen(a, b)
@@ -317,12 +323,16 @@ end
 local TEXT = D.TEXT
 
 function D.LoadKey(itemID, link)
-    if type(link) == "string" and link ~= "" then return "l:" .. link end
-    return "i:" .. tostring(itemID or "")
+    if type(link) == "string" and link ~= "" then return LINK_KEY .. link end
+    return ID_KEY .. tostring(itemID or "")
 end
 
 function D.IsLinkKey(key)
-    return type(key) == "string" and key:sub(1, 2) == "l:"
+    return type(key) == "string" and key:sub(1, #LINK_KEY) == LINK_KEY
+end
+
+function D.KeyBody(key)
+    return key:sub(#LINK_KEY + 1)
 end
 
 local function Priced(e)
@@ -408,7 +418,7 @@ function D.CompareGaps(pick, loot)
         if pc and lc then out.ahStack = (lau * lc) - (pau * pc) end
     end
     if pc and lc and not (lc == 1 and pc == 1) then
-        out.columns = 2
+        out.columns = D.STACK_COLUMNS
         if lc == 1 then out.stackLabel = TEXT.COL_TOTAL else out.stackLabel = TEXT.COL_STACK end
     end
     return out
