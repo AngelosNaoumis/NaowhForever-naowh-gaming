@@ -1,0 +1,13 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!-- EntrancePins.xml: the entrance pins' code and their template. -->
+    <Script file="EntrancePins.lua"/>
+    <Button name="NaowhForeverEntrancePinTemplate" mixin="NaowhForeverEntrancePinMixin" enableMouse="true" virtual="true">
+        <Size x="22" y="22"/>
+        <Layers>
+            <Layer level="ARTWORK">
+                <Texture parentKey="Icon" setAllPoints="true"/>
+            </Layer>
+        </Layers>
+        <Scripts><OnClick method="OnClick"/></Scripts>
+    </Button>
+</Ui>

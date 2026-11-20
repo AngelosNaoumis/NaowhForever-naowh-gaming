@@ -1,0 +1,177 @@
+-- Run with Lua 5.1 from the repository root: optional profession ranges and their shared bar geometry.
+local checks = 0
+local function Check(label, condition) assert(condition, label); checks = checks + 1 end
+local settings = { enabled = true, skillThresholds = false }
+local builds = 0
+local currentSkill, modifier = 125, 5
+local ns = {
+    Shared = { Parts = {} },
+    THEME = { fg = { r = 1, g = 1, b = 1 } },
+    Professions = {
+        Settings = { Get = function(key) return settings[key] end }, State = {}, Prices = {},
+        Style = { SKILL_BAR_GAP = 8, PANE_INNER_W = 372, DIFFICULTY_RGB = {} },
+        Recipes = { Profession = function() return { skill = currentSkill, modifier = modifier } end },
+    },
+    RecipeData = {
+        [197] = { recipes = {
+            { spell = 10, skill = 75, yellow = 95, grey = 130 },
+            { spell = 11, skill = 45, yellow = 30, grey = 65 },
+            { spell = 12, skill = 300, yellow = 280, grey = 300 },
+            { spell = 13, skill = 1 },
+            { spell = 14, skill = 35, yellow = 40, grey = 40 },
+        } },
+    },
+}
+_G.NaowhForever = ns
+_G.CreateFrame = function() error("frames must not be built while disabled") end
+dofile("NaowhForever_Professions/SkillUps.lua")
+dofile("NaowhForever_Professions/UI/SkillThresholds.lua")
+local ranges = ns.Professions.SkillThresholds
+Check("disabled feature reads nothing", ranges.Read({ recipeID = 10 }) == nil)
+settings.skillThresholds = true
+ns.Professions.State.linked = true
+Check("linked professions read nothing", ranges.Read({ recipeID = 10 }) == nil)
+ns.Professions.State.linked = false
+local a, b, c, d = ranges.Read({ recipeID = 10 })
+Check("orange starts at the learn skill, green at the midpoint", a == 75 and b == 95 and c == 112 and d == 130)
+a, b, c, d = ranges.Read({ recipeID = 10, maxTrivialLevel = 140 })
+Check("live grey also updates inferred green", a == 75 and b == 95 and c == 117 and d == 140)
+a, b, c, d = ranges.Read({ recipeID = 11 })
+Check("a recipe learned past its yellow is yellow from the learn skill", a == 45 and b == 45 and c == 47 and d == 65)
+Check("contradictory live grey is not drawn", ranges.Read({ recipeID = 10, maxTrivialLevel = 90 }) == nil)
+Check("a recipe grey once learned is not drawn", ranges.Read({ recipeID = 12 }) == nil)
+Check("a recipe without a range is not guessed", ranges.Read({ recipeID = 13 }) == nil)
+Check("unknown recipe is not guessed", ranges.Read({ recipeID = 20 }) == nil)
+a, b, c, d = ranges.Read({ recipeID = 14 })
+Check("a recipe orange until grey has no yellow or green band", a == 35 and b == 40 and c == 40 and d == 40)
+local parent = { icon = {} }
+ns.Shared.Parts.ThresholdLine = function()
+    builds = builds + 1
+    return {
+        SetPoint = function() end, SetWidth = function() end,
+        Fill = function(self, first, yellow, green, grey, skill, _, text)
+            self.bounds = { first, yellow, green, grey, skill }; self.chance = text
+        end,
+        Show = function(self) self.shown = true end, Hide = function(self) self.shown = false end,
+    }
+end
+local line = ranges.Render(parent, { recipeID = 10 })
+Check("current skill includes the racial modifier", line.bounds[5] == 130)
+Check("grey recipes have zero chance", line.chance == "0%")
+currentSkill, modifier = 85, 0
+ranges.Render(parent, { recipeID = 10 })
+Check("orange chance is capped at one hundred", line.chance == "100%")
+currentSkill = 95
+ranges.Render(parent, { recipeID = 10 })
+Check("yellow boundary has one hundred percent chance", line.chance == "100%")
+currentSkill = 112
+ranges.Render(parent, { recipeID = 10 })
+Check("chance uses the requested formula and rounds", line.chance == "51%")
+ranges.Render(parent, { recipeID = 10, maxTrivialLevel = 140 })
+Check("chance uses the live grey threshold", line.chance == "62%")
+currentSkill = 150
+ranges.Render(parent, { recipeID = 10 })
+Check("chance never becomes negative", line.chance == "0%")
+currentSkill = 45
+ranges.Render(parent, { recipeID = 11 })
+Check("a recipe learned past its yellow is not sure at its learn skill", line.chance == "57%")
+currentSkill = 38
+ranges.Render(parent, { recipeID = 14 })
+Check("an orange-until-grey recipe is sure below its grey", line.chance == "100%")
+currentSkill = 40
+ranges.Render(parent, { recipeID = 14 })
+Check("and gives none from its grey", line.chance == "0%")
+currentSkill = 70
+ranges.Render(parent, { recipeID = 10 })
+Check("below the learn skill the line has no chance", line.chance == nil and line.bounds[5] == 70)
+Check("line is built once and shown", builds == 1 and line.shown)
+settings.skillThresholds = false
+Check("turning off hides the line", ranges.Render(parent, { recipeID = 10 }) == nil and not line.shown)
+settings.skillThresholds = true
+ranges.Render(parent, { recipeID = 10 })
+Check("re-enabling reuses the line", builds == 1 and line.shown)
+settings.enabled = false
+Check("module off hides the line", ranges.Render(parent, { recipeID = 10 }) == nil and not line.shown)
+
+local SkillUps = ns.Professions.SkillUps
+local chance, band = SkillUps.ForRecipe({ recipeID = 10, relativeDifficulty = 0 }, 200)
+Check("the game's orange wins over the data", chance == 1 and band == 0)
+chance, band = SkillUps.ForRecipe({ recipeID = 10, relativeDifficulty = 3 }, 50)
+Check("the game's grey wins over the data", chance == 0 and band == 3)
+chance, band = SkillUps.ForRecipe({ recipeID = 10, relativeDifficulty = 1 }, 112)
+Check("a yellow recipe's chance comes from its range", math.floor(chance * 100 + 0.5) == 51 and band == 1)
+Check("a recipe without a range has no chance", SkillUps.ForRecipe({ recipeID = 13, relativeDifficulty = 1 }, 50) == nil)
+chance, band = SkillUps.ForUnlearned(ns.RecipeData[197].recipes[1], 120)
+Check("an unlearned recipe's chance is read at your skill", math.floor(chance * 100 + 0.5) == 29 and band == 2)
+Check("an unlearned recipe without a range has none", SkillUps.ForUnlearned(ns.RecipeData[197].recipes[4], 50) == nil)
+ns.Professions.Prices.NetCost = function(id) return ({ [10] = 300, [11] = -40 })[id] end
+Check("a skill-up costs a craft over its chance", SkillUps.CostPerPoint(10, 0.5) == 600)
+Check("a craft that sells for more than it costs earns per skill-up", SkillUps.CostPerPoint(11, 1) == -40)
+Check("an unpriced craft has no cost", SkillUps.CostPerPoint(12, 1) == nil)
+Check("a craft with no chance has no cost", SkillUps.CostPerPoint(10, 0) == nil)
+
+local function Frame()
+    return {
+        shown = true, width = 372,
+        SetHeight = function(self, value) self.height = value end,
+        SetWidth = function(self, value) self.width = value end,
+        SetSize = function(self, width, height) self.width, self.height = width, height end,
+        GetWidth = function(self) return self.width end,
+        SetPoint = function(self, ...) self.point = { ... } end,
+        ClearAllPoints = function() end, SetAllPoints = function() end,
+        SetFrameLevel = function() end, GetFrameLevel = function() return 1 end,
+        SetScript = function() end, SetJustifyH = function() end,
+        SetShown = function(self, value) self.shown = value end,
+        SetText = function(self, value) self.text = value end,
+        GetStringWidth = function(self) return #self.text * 6 end,
+        Paint = function() end, SetProgress = function() end,
+    }
+end
+_G.CreateFrame = Frame
+ns.Font = Frame
+ns.Border = function() end
+ns.Solid = Frame
+ns.Shared.Parts.ProgressLine = function() local bar = Frame(); bar.fill = Frame(); return bar end
+dofile("Shared/Style.lua")
+dofile("Shared/UI/Thresholds.lua")
+local bar = ns.Shared.Parts.ThresholdLine(Frame())
+local colors = { [0] = {}, {}, {}, {} }
+bar:Fill(1, 95, 112, 130, 125, colors)
+Check("the line has all four bands", #bar.bands == 4)
+Check("numeric boundaries stay in order", bar.labels[1].text == "1" and bar.labels[4].text == "130")
+Check("ordinary ranges use one compact label row", bar.height == ns.Shared.Style.THRESHOLD_HEIGHT)
+Check("the skill marker lies inside the bar", bar.marker.point[4] > 0 and bar.marker.point[4] < bar:GetWidth())
+bar:Fill(1, 95, 112, 130, 125, colors, "14%")
+Check("chance label is visible", bar.markerLabel.shown and bar.markerLabel.text == "14%")
+Check("chance label reserves its own row", bar.height == ns.Shared.Style.THRESHOLD_HEIGHT + ns.Shared.Style.THRESHOLD_LABEL_HEIGHT)
+Check("chance label is below boundary labels", bar.markerLabel.point[5] < bar.labels[4].point[5])
+Check("marker is taller than the track", bar.marker.height == ns.Shared.Style.THRESHOLD_BAR_HEIGHT + 10)
+bar:Fill(1, 95, 112, 130, 0, colors)
+Check("low skill marker is clamped", bar.marker.point[4] == 0)
+Check("omitting optional text restores compact layout", not bar.markerLabel.shown and bar.height == ns.Shared.Style.THRESHOLD_HEIGHT)
+bar:Fill(1, 95, 112, 130, 300, colors)
+Check("high skill marker is clamped", bar.marker.point[4] == bar:GetWidth())
+bar:Fill(1, 95, 112, 130, nil, colors)
+Check("missing skill hides only the marker", not bar.marker.shown)
+bar:Fill(1, 95, 112, 130, nil, colors, "50%")
+Check("missing skill hides the chance", not bar.markerLabel.shown)
+bar:Fill(1, 1, 2, 3, 1, colors)
+Check("a missing orange band occupies no room", not bar.bands[1].shown)
+Check("an empty band shows no label of its own", not bar.labels[1].shown and bar.labels[2].shown)
+bar:SetWidth(180)
+bar:Fill(1, 145, 147, 150, 149, colors, "20%")
+Check("chance stays inside narrow bars", bar.markerLabel.point[4] >= 0 and bar.markerLabel.point[4] + bar.markerLabel:GetStringWidth() <= bar:GetWidth())
+for i = 1, #bar.labels do
+    local label = bar.labels[i]
+    Check("close thresholds all remain visible", label.shown)
+    if label.shown then
+        Check("visible label stays inside the line", label.point[4] >= 0 and label.point[4] + label:GetStringWidth() <= bar:GetWidth())
+        for j = i + 1, #bar.labels do
+            local other = bar.labels[j]
+            if other.shown and other.point[5] == label.point[5] then
+                Check("labels on a row never overlap", label.point[4] + label:GetStringWidth() <= other.point[4])
+            end
+        end
+    end
+end
+print(("test-profession-skill-thresholds: %d checks passed"):format(checks))

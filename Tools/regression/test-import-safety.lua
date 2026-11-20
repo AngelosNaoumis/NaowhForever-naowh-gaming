@@ -1,0 +1,476 @@
+-- Run with Lua 5.1 from the repository root: what a pasted string or another player's message can
+-- do to us. Bombs, cycles, shared tables, deep nesting, numbers that do not save, escape codes in
+-- names, flooding and claims made for someone else are each refused without an error and without
+-- touching saved data. Offline: no client taint, rendering or real addon channel.
+rawset(_G, "C_AddOns", { DoesAddOnExist = function() return false end, GetAddOnEnableState = function() return 0 end })
+strmatch = string.match
+dofile("Libs/LibStub/LibStub.lua")
+dofile("Libs/LibDeflate/LibDeflate.lua")
+dofile("Libs/LibSerialize/LibSerialize.lua")
+local LS, LD = LibStub("LibSerialize"), LibStub("LibDeflate")
+local LoadDecode = dofile("Tools/regression/load_decode.lua")
+
+local checks = 0
+local function check(label, ok) assert(ok, label); checks = checks + 1 end
+
+local function Encode(value) return LD:EncodeForPrint(LD:CompressDeflate(LS:Serialize(value))) end
+local function Timed(fn)
+    local t = os.clock()
+    local a, b = fn()
+    return os.clock() - t, a, b
+end
+
+local D = LoadDecode(setmetatable({}, { __index = _G }))
+local SMALL = { maxChars = 100000, maxBytes = 1048576, maxDepth = 8, maxValues = 20000 }
+
+do -- the size scan agrees with LibDeflate on every level and kind of input
+    math.randomseed(11)
+    for trial = 1, 24 do
+        local parts = {}
+        for i = 1, math.random(0, 6000) do parts[i] = string.char(32 + math.random(0, trial % 4 * 30 + 1)) end
+        local s = table.concat(parts) .. string.rep("ab", math.random(0, 3000))
+        local packed = LD:CompressDeflate(s, { level = trial % 10 })
+        check("scan size matches, trial " .. trial, D.InflatedSize(packed, 1e9) == #s)
+    end
+    check("an empty stream is broken", D.InflatedSize("", 10) == nil)
+    check("a truncated stream is broken", D.InflatedSize(LD:CompressDeflate(string.rep("xyz", 999)):sub(1, 5), 1e9) == nil)
+end
+
+do -- a decompression bomb is refused at its cap, before LibDeflate builds it
+    local bomb = LD:EncodeForPrint(LD:CompressDeflate(string.rep("A", 8 * 1024 * 1024)))
+    local took, value, why = Timed(function() return D.String(bomb, SMALL) end)
+    check("bomb refused", value == nil and why == "damaged")
+    check(("bomb refused fast (%.3f s)"):format(took), took < 1)
+    check("a body over the cap is refused unread", select(2, D.String(string.rep("a", 100001), SMALL)) == "big")
+    for _, junk in ipairs({ "", "!!!!", "abcd", string.rep("z", 5000), Encode({ name = string.rep("q", 300), n = 12345 }):sub(1, 20) }) do
+        check("junk is damaged, not an error: " .. #junk, D.String(junk, SMALL) == nil)
+    end
+end
+
+do -- cycles, shared tables, depth, keys and numbers
+    local cycle = { name = "x" }
+    cycle.self = cycle
+    check("a cycle is refused", D.String(Encode(cycle), SMALL) == nil)
+    local layer = { 1 }
+    for _ = 1, 25 do layer = { layer, layer } end
+    local billion = Encode({ v = 1, layer = layer })
+    check("shared tables cost little to send", #billion < 2000)
+    local took, value = Timed(function() return D.String(billion, { maxChars = 1e6, maxBytes = 4194304,
+        maxDepth = 32, maxValues = 1000000 }) end)
+    check(("2^25 paths through shared tables are refused (%.3f s)"):format(took), value == nil and took < 2)
+    local deep = {}
+    for _ = 1, 40 do deep = { deep } end
+    check("nesting past the cap is refused", D.String(Encode(deep), SMALL) == nil)
+    check("a table key is refused", D.String(Encode({ [{}] = 1 }), SMALL) == nil)
+    check("a boolean key is refused", D.String(Encode({ [true] = 1 }), SMALL) == nil)
+    check("infinity is refused", D.String(Encode({ w = math.huge }), SMALL) == nil)
+    check("minus infinity is refused", D.String(Encode({ w = -math.huge }), SMALL) == nil)
+    check("not-a-number is refused", D.String(Encode({ w = 0 / 0 }), SMALL) == nil)
+    check("plain data comes back", D.String(Encode({ v = 1, list = { 1, 2.5, "x", true } }), SMALL).list[2] == 2.5)
+end
+
+do -- text from outside shows as text
+    check("escapes and line breaks go", D.Text("|cffe6cc80Naowh|r\n[Naowh]: |Hurl:x|h[click]|h |TInterface\\x:0|t", 200)
+        == "cffe6cc80Naowhr[Naowh]: Hurl:xh[click]h TInterface\\x:0t")
+    check("capped", #D.Text(string.rep("a", 500), 40) == 40)
+    check("not a string is nil", D.Text(5) == nil and D.Text({}) == nil)
+end
+
+-------------------------------------------------------------------------------
+--  The Profiles page's import, and an old Reminder Pack string, on the real libraries
+-------------------------------------------------------------------------------
+local function World()
+    local w = { profiles = { Default = { tankReminder = {} } }, account = {}, printed = {} }
+    local ns = { L = dofile("Tools/regression/locale_stub.lua").L, Upper = string.upper, Lower = string.lower,
+        UI = { Widgets = {} }, CODE_BUILD = "test", Macros = { C = { LIMIT = 255 } },
+        THEME = { accent = {}, muted = {}, fg = {}, panel = {}, bg = {}, line = {} },
+        Color = function(_, text) return text or "" end,
+        Print = function(m) w.printed[#w.printed + 1] = m end,
+        ListProfiles = function() return {} end,
+        SettingsRoot = function() return w.profiles.Default end,
+        AccountSettings = function() return w.account end,
+        ModuleDefaults = function(key) return key == "qol" and { enabled = true } or nil end,
+        ActiveProfileName = function() return "Default" end,
+        ProfileExists = function(name) return w.profiles[name] ~= nil end,
+        ProfileTable = function(name) return w.profiles[name] end,
+        ProfileRoot = function(name)
+            w.profiles[name] = w.profiles[name] or { tankReminder = {} }
+            return w.profiles[name]
+        end,
+        EnsureProfile = function(name)
+            w.profiles[name] = w.profiles[name] or {}
+            return w.profiles[name]
+        end,
+        SwitchProfile = function(name) w.switched = name end,
+        RefreshRuntime = function() end,
+    }
+    local env = setmetatable({ NaowhForever = ns, UnitName = function() return "Me" end, UnitGUID = function() return "Player-1" end, date = os.date,
+        CreateFrame = function() return { SetScript = function() end } end }, { __index = _G })
+    env._G = env
+    ns.Shared = { Decode = LoadDecode(env) }
+    local chunk = assert(loadfile("Core/Profiles/ProfileShare.lua"))
+    setfenv(chunk, env)
+    chunk()
+    w.ns, w.env = ns, env
+    return w
+end
+
+local function Profile(payload) return "NFPROFILE1:" .. Encode(payload) end
+
+do -- a profile string: names, consumables, class macros, the look and BiS lists
+    local w = World()
+    local layer = {}
+    for _ = 1, 22 do layer = { layer, layer } end
+    local took, bomb = Timed(function() return w.ns.DecodeProfile(Profile({ format = 1, parts = { settings = { qol = layer } } })) end)
+    check(("a shared-table profile is refused without a freeze (%.3f s)"):format(took), bomb == nil and took < 2)
+
+    local payload = w.ns.DecodeProfile(Profile({ format = 1,
+        name = "|TInterface\\AddOns\\NaowhForever\\Core\\Badges\\Media\\BadgeNaowhChat.tga:0|t Official",
+        author = "|cffe6cc80Naowh|r\n[Naowh]: trust me", made = "|Hurl:x|h",
+        parts = {
+            consumables = { { category = "food", itemID = 13931 }, { category = "food", itemID = -1 } },
+            reminders = { customReminders = { ["1"] = { a = { name = 5 } } },
+                utilityReminders = { consumables = { { category = "food", itemID = 13931 } } } },
+            macros = { classMacros = { PALADIN = { { name = "Fine", body = string.rep("x", 900) } } } },
+            look = { windowScale = "big", themeColors = 7, uiFont = "Naowh" },
+            bisLists = { MAGE = { { name = "|cffff0000Red|r\nList", spec = "fire", slots = { [1] = 101, [4] = 5,
+                [2] = "x", [3] = 1e300, [99] = 7 }, extra = { [1] = { 102, -1, 0.5, 103 } } } } },
+        } }))
+    check("the profile decodes", payload ~= nil)
+    check("its name, author and date are plain text", not payload.name:find("|", 1, true)
+        and #payload.name <= 64 and payload.author == "cffe6cc80Naowhr[Naowh]: trust me" and payload.made == "Hurl:xh")
+    check("consumables are left out", payload.parts.consumables == nil)
+    check("an old reminders part is gone, and cannot stand in for them", payload.parts.reminders == nil)
+    check("class macros past the game's limits are left out", payload.parts.macros.classMacros == nil)
+    local _, added = w.ns.ImportProfile(payload, { consumables = true, macros = true, look = true, bisLists = true }, "Mine")
+    check("the look takes only values of the right type", w.account.windowScale == nil and w.account.themeColors == nil
+        and w.account.uiFont == "Naowh")
+    local list = w.account.bisLists.MAGE.lists[1]
+    check("a BiS list lands cleaned", added.bisLists == 1 and list.name == "cffff0000RedrList" and list.spec == "fire")
+    check("only gear slots holding item IDs", list.slots[1] == 101 and list.slots[2] == nil and list.slots[3] == nil
+        and list.slots[4] == nil and list.slots[99] == nil)
+    check("and picks that are item IDs", #list.extra[1] == 2 and list.extra[1][2] == 103)
+    check("the reminders' store untouched", next(w.profiles.Mine.tankReminder) == nil)
+end
+
+do -- an old Reminder Pack string, even a bomb, is refused unread and changes nothing
+    local w = World()
+    local data = { presets = { ["250"] = { p1 = { name = "Tank", list = { 1 } } } },
+        utilityReminders = { consumables = { { category = "food", itemID = 13931 } } } }
+    local pack = "NSRPACK2:" .. Encode({ format = 1, name = "|cff0091edNaowh Official|r", data = data })
+    local payload, why = w.ns.DecodeProfile(pack)
+    check("a pack is refused with a message", payload == nil and why == "Reminder Packs are no longer supported.")
+    local bomb = "NSRPACK2:" .. LD:EncodeForPrint(LD:CompressDeflate(string.rep("\0", 6 * 1024 * 1024)))
+    local took, value, said = Timed(function() return w.ns.DecodeProfile(bomb) end)
+    check(("a pack bomb is refused unread (%.3f s)"):format(took), value == nil and said == why and took < 1)
+    local ok, told = w.env.NaowhForever_API:ImportProfile(pack, "Naowh")
+    check("the installer's import refuses it and says why", ok == false and told == why
+        and w.printed[1] == "Naowh Forever import failed: " .. why)
+    check("no profile is made or switched to", w.profiles.Naowh == nil and w.switched == nil
+        and next(w.profiles.Default.tankReminder) == nil)
+end
+
+-------------------------------------------------------------------------------
+--  The Wago-facing half of NaowhForever_API: any profile exports, the same string decodes
+-------------------------------------------------------------------------------
+do
+    local w = World()
+    local API = w.env.NaowhForever_API
+    w.profiles.Other = { qol = { enabled = false } }
+    w.profiles.Default.qol = { enabled = true }
+    local qolStore = { key = "qol", Default = function() return true end }
+    w.ns.ModuleAddons = function()
+        return { { addon = "NaowhForever_QoL", store = qolStore, key = "enabled", on = true },
+            { addon = "NaowhForever_Macros", key = "enabled", on = false } }
+    end
+    w.ns.ListProfiles = function() return { "Default", "Other" } end
+    w.ns.SwitchProfile = function(name) w.switched = name return true end
+    w.ns.KnownCharacters = function() return { { char = "Me-Realm", profile = "Other" } } end
+    local keys = API:GetProfileKeys()
+    check("every profile is a key", keys.Default == true and keys.Other == true and not keys.Nope)
+    check("the current profile key", API:GetCurrentProfileKey() == "Default")
+    check("assignments are character to profile", API:GetProfileAssignments()["Me-Realm"] == "Other")
+    local str = API:ExportProfile("Other")
+    check("a profile that is not current exports as a profile string", type(str) == "string" and str:sub(1, 11) == "NFPROFILE1:")
+    local payload = w.ns.DecodeProfile(str)
+    check("it carries that profile, named after it", payload.name == "Other" and payload.parts.settings.qol.enabled == false)
+    local modules = payload.parts.settings.__modules
+    check("its modules are that profile's switches, not this character's", modules.NaowhForever_QoL == false)
+    check("a module with no store here is left out", modules.NaowhForever_Macros == nil)
+    check("exporting it leaves the profile as it was", w.profiles.Other.tankReminder == nil)
+    local current = w.ns.DecodeProfile(API:ExportProfile("Default")).parts.settings
+    check("the current profile still exports its own", current.qol.enabled == true)
+    check("with this character's modules", current.__modules.NaowhForever_QoL == true
+        and current.__modules.NaowhForever_Macros == false)
+    check("decoding gives the parts", API:DecodeProfileString(str).settings.qol.enabled == false)
+    check("decoding junk gives nil", API:DecodeProfileString("garbage") == nil and API:DecodeProfileString(nil) == nil)
+    check("an unknown or bad key exports nothing and makes no profile", API:ExportProfile("Nope") == nil
+        and API:ExportProfile(nil) == nil and API:ExportProfile({}) == nil and w.profiles.Nope == nil)
+    check("SetProfile switches to an existing profile", API:SetProfile("Other") == true and w.switched == "Other")
+    w.switched = nil
+    check("SetProfile ignores an unknown one", API:SetProfile("Nope") == false and w.switched == nil)
+end
+
+-------------------------------------------------------------------------------
+--  Blessings: a paladin's per-player choices are capped
+-------------------------------------------------------------------------------
+do
+    local frames = {}
+    local account = {}
+    local meta = { __index = function() return function() end end }
+    local function Frame()
+        local f = setmetatable({ scripts = {} }, meta)
+        function f:SetScript(k, fn) self.scripts[k] = fn end
+        frames[#frames + 1] = f
+        return f
+    end
+    local units = {
+        player = { "Me Self", "Me", "WARRIOR" },
+        party1 = { "Holy Man", "Holy", "PALADIN" },
+    }
+    local sent = {}
+    local ns = { L = dofile("Tools/regression/locale_stub.lua").L, Upper = string.upper, Lower = string.lower, QoLSettings = { Get = function() return true end, Set = function() end },
+        THEME = { fg = {}, muted = {}, accent = {}, bg = {} }, AccountSettings = function() return account end,
+        Print = function() end,
+        Apply = function() end, UI = { RefreshPage = function() end },
+        Shared = { Style = dofile("Tools/regression/shared_style.lua"), Parts = { HudFont = function() end } },
+        ShowUnlockMode = function() end, HideUnlockMode = function() end }
+    local env = setmetatable({ NaowhForever = ns, CreateFrame = Frame, hooksecurefunc = function() end,
+        C_Timer = { After = function() end }, GetTime = function() return 0 end,
+        GetRealmName = function() return "Forever" end, C_SpellBook = { IsSpellKnown = function() return true end },
+        IsInRaid = function() return false end, GetNumSubgroupMembers = function() return 1 end,
+        GetNumGroupMembers = function() return 2 end, GetNormalizedRealmName = function() return "Forever" end,
+        UnitFullName = function(u) if units[u] then return units[u][1], units[u][4] end end,
+        UnitName = function(u) return units[u] and units[u][2] end,
+        UnitClass = function(u) return units[u] and units[u][3], units[u] and units[u][3] end,
+        UnitGUID = function(u) return units[u] and ("Player-1-" .. u) end,
+        Ambiguate = function(name) return name end, issecretvalue = function() return false end,
+        UnitIsGroupLeader = function() return false end, UnitIsGroupAssistant = function() return false end,
+        InCombatLockdown = function() return false end, IsInGroup = function() return true end,
+        C_ChatInfo = { SendAddonMessage = function(prefix, msg) sent[#sent + 1] = prefix .. " " .. msg end },
+    }, { __index = _G })
+    function ns.OnApply(fn) env.hooksecurefunc(ns, "Apply", fn) end
+    env._G = env
+    local senders = assert(loadfile("Core/Senders.lua"))
+    setfenv(senders, env)
+    senders()
+    for _, path in ipairs(dofile("Tools/regression/toc_files.lua")("^NaowhForever_Combat/Blessings/.*%.lua$")) do
+        if not path:find("/UI/Window%.lua$") then
+            local chunk = assert(loadfile(path))
+            setfenv(chunk, env)
+            chunk("NaowhForever", ns)
+        end
+    end
+    local fire
+    for _, f in ipairs(frames) do
+        if f.scripts.OnEvent and not fire then
+            local ok = pcall(f.scripts.OnEvent, f, "CHAT_MSG_ADDON", "NaowhBless", "F|----------|", "PARTY", "Holy Man")
+            if ok and ns.Blessings.Others()["Holy Man"] then fire = f end
+        end
+    end
+    check("a paladin in the group is heard", fire ~= nil)
+    local function Send(text, sender)
+        fire.scripts.OnEvent(fire, "CHAT_MSG_ADDON", "NaowhBless", text, "PARTY", sender or "Holy Man")
+    end
+    local queued = 0
+    env.C_Timer.After = function() queued = queued + 1 end
+    Send("R", "Me Self")
+    check("our own request is not answered", queued == 0)
+    Send("R", "Stranger Danger")
+    check("a request is answered even from a sender the roster cannot place", queued == 1)
+    local reads = 0
+    env.IsInRaid = function() reads = reads + 1 return false end
+    Send("F|----------|")
+    check("a plan message reads the group once", reads == 1)
+    env.IsInRaid = function() return false end
+    local n = 0
+    for batch = 1, 60 do
+        local parts = {}
+        for i = 1, 12 do
+            n = n + 1
+            parts[i] = ("Player-9-%06X=m"):format(n)
+        end
+        Send("P|" .. (batch == 1 and 1 or 2) .. "|" .. table.concat(parts, ","))
+    end
+    local count = 0
+    for _ in pairs(ns.Blessings.Others()["Holy Man"].players) do count = count + 1 end
+    check(("720 claimed players keep 40 (%d)"):format(count), count == 40)
+    Send("F|----------|")
+    Send("P|2|Player-9-FFFFFF=m")
+    count = 0
+    for _ in pairs(ns.Blessings.Others()["Holy Man"].players) do count = count + 1 end
+    check("a plan update does not reset the cap", count == 40)
+    Send("P|1|Player-9-000001=k")
+    count = 0
+    for _ in pairs(ns.Blessings.Others()["Holy Man"].players) do count = count + 1 end
+    check("a fresh list starts over", count == 1)
+    Send("P|1|Player-9-000001=k", "Stranger Danger")
+    check("a sender with no plan is ignored", ns.Blessings.Others()["Stranger Danger"] == nil)
+
+    -- Blessing of Light and Salvation are gone from the game. An older client's code for either is no blessing:
+    -- a plan carrying one is refused, and the code is dropped from what they know and from their own choices.
+    Send("F|m--------D|mwD")
+    Send("F|-s-------D|msw")
+    local holy = ns.Blessings.Others()["Holy Man"]
+    check("a plan with an old class Salvation is refused, the last one kept", holy.classes.WARRIOR == "might"
+        and holy.classes.PALADIN == nil)
+    Send("F|---l-----D|mlw")
+    check("so is one with Light", ns.Blessings.Others()["Holy Man"].classes.ROGUE == nil
+        and ns.Blessings.Others()["Holy Man"].classes.WARRIOR == "might")
+    Send("F|---------s|m")
+    check("and one with Salvation in the aura place", ns.Blessings.Others()["Holy Man"].aura == "devotion")
+    Send("F|m--------D|mwlsY")
+    holy = ns.Blessings.Others()["Holy Man"]
+    check("old codes in the known list are dropped", holy.known.might and holy.known.wisdom
+        and not holy.known.light and not holy.known.salvation)
+    Send("P|1|Player-9-000002=s,Player-9-000003=l")
+    local own = 0
+    for _ in pairs(ns.Blessings.Others()["Holy Man"].players) do own = own + 1 end
+    check("a player's own Light or Salvation from an older client is not kept", own == 0)
+    Send("V|Me Self-Forever|1")
+    check("an old Salvation message changes nothing", ns.Blessings.Others()["Holy Man"].classes.WARRIOR == "might")
+
+    -- Symbols of Kings and cooldowns come as numbers and are clamped; Free Assignment is a flag.
+    Send("I|12|600|-1")
+    local status = ns.Blessings.Others()["Holy Man"].status
+    check("a paladin's Symbols and cooldowns are kept", status.symbols == 12 and status.loh == 600 and status.di == nil)
+    Send("I|99999|0|0")
+    check("a silly Symbol count is clamped", ns.Blessings.Others()["Holy Man"].status.symbols == 9999)
+    Send("I|abc|0|0")
+    Send("I|5|x|0")
+    check("a status that is not numbers is ignored", ns.Blessings.Others()["Holy Man"].status.symbols == 9999)
+    Send("I|7|0|0", "Stranger Danger")
+    check("a status from a sender with no plan is ignored", ns.Blessings.Others()["Stranger Danger"] == nil)
+    Send("F|----------|mwX")
+    check("the flag in the known list says Free Assignment is on", ns.Blessings.Others()["Holy Man"].free == true)
+    Send("F|----------|mw")
+    check("and its absence says it is off", ns.Blessings.Others()["Holy Man"].free == nil)
+    check("a plan update keeps the last status", ns.Blessings.Others()["Holy Man"].status.symbols == 9999)
+
+    units.player[3] = "PALADIN"
+    local store = ns.Blessings.Store()
+    Send("S|Player-1-player|k---------")
+    check("a paladin who does not lead cannot plan for you", next(store.classes) == nil)
+    store.free = true
+    Send("S|Me Self-Forever|k---------")
+    check("an assignment addressed by name is not taken", next(store.classes) == nil)
+    Send("S|Player-1-player|k---------")
+    check("with Free Assignment on, a paladin in the group can", store.classes.WARRIOR == "kings")
+    Send("S|Player-1-party1|-m--------")
+    check("an assignment for another paladin is not taken", store.classes.PALADIN == nil)
+    Send("S|Player-1-player|-m--------", "Stranger Danger")
+    check("with it on, someone who is not in the group still cannot", store.classes.WARRIOR == "kings"
+        and store.classes.PALADIN == nil)
+    units.party1[3] = "WARRIOR"
+    Send("S|Player-1-player|-m--------")
+    check("with it on, a player who is not a paladin and not an assistant cannot", store.classes.PALADIN == nil)
+    units.party1[3] = "PALADIN"
+
+    -- A party member's UnitFullName can give the first name and surname apart, while the sender is the whole name.
+    units.party1 = { "Holy", "Holy", "PALADIN", "Man" }
+    Send("F|m---------|mk")
+    local holyMan = ns.Blessings.Others()["Holy-Man"]
+    check("a paladin whose sender is spelled unlike the party list is heard", holyMan ~= nil
+        and holyMan.classes.WARRIOR == "might")
+    Send("F|k---------|mk", "Holy Man-Forever")
+    check("with the realm on the sender too", ns.Blessings.Others()["Holy-Man"].classes.WARRIOR == "kings")
+    local printed
+    ns.Print = function(m) printed = m end
+    Send("S|Player-1-player|w---------")
+    check("and can plan for you", store.classes.WARRIOR == "wisdom")
+    check("the chat line names them as they are called", printed == "Holy Man updated your blessings.")
+    ns.Blessings.SendPlan("Holy-Man", { WARRIOR = "might" })
+    check("an assignment names its paladin by GUID", sent[#sent] == "NaowhBless S|Player-1-party1|m---------")
+
+    -- A paladin running PallyPower is read from its messages and never planned for.
+    local function PallyPower(text, sender, channel)
+        fire.scripts.OnEvent(fire, "CHAT_MSG_ADDON", "PLPWR", text, channel or "PARTY", sender)
+    end
+    env.GetNumSubgroupMembers = function() return 2 end
+    units.party2 = { "Lux", "Lux", "PALADIN", "Aeterna" }
+    ns.Blessings.AskPallyPower()
+    check("a paladin with no plan is asked for PallyPower's", sent[#sent] == "PLPWR REQ")
+    local requests = #sent
+    ns.Blessings.AskPallyPower()
+    check("a paladin who does not answer is asked only once", #sent == requests)
+    ns.Blessings.AskPallyPowerAgain()
+    ns.Blessings.AskPallyPower()
+    check("Refresh asks them again", #sent == requests + 1 and sent[#sent] == "PLPWR REQ")
+    PallyPower("ASELF 70nn10nnnnnnnn@3", "Lux Aeterna")
+    PallyPower("FREEASSIGN YES | SYMCOUNT 3 | COOLDOWNS:n:n:n:n", "Lux Aeterna")
+    check("an aura or status before any plan makes no PallyPower plan", ns.Blessings.Others()["Lux-Aeterna"] == nil)
+    PallyPower("SELF 607010nnnnnn@2213n4113", "Lux Aeterna", "WHISPER")
+    local lux = ns.Blessings.Others()["Lux-Aeterna"]
+    check("a PallyPower paladin's blessings are read, whispered too", lux ~= nil and lux.pallyPower
+        and lux.classes.WARRIOR == "might" and lux.classes.PRIEST == "wisdom" and lux.classes.DRUID == "kings")
+    check("a blessing Forever does not have is none", lux.classes.HUNTER == nil and lux.classes.PALADIN == nil)
+    check("what they know comes from their ranks", lux.known.might and lux.known.kings and not lux.known.devotion)
+    PallyPower("ASELF 70nn10nnnnnnnn@3", "Lux Aeterna")
+    check("their aura is read", lux.aura == "concentration" and lux.known.devotion and not lux.known.retribution)
+    PallyPower("FREEASSIGN NO | SYMCOUNT 12 | COOLDOWNS:3600:600:3600:n", "Lux Aeterna")
+    check("their Symbols and Lay on Hands are read", lux.status.symbols == 12 and lux.status.loh == 600
+        and lux.status.di == nil)
+    PallyPower("FREEASSIGN NO | SYMCOUNT 99999 | COOLDOWNS:3600:inf:3600:-5", "Lux Aeterna")
+    check("silly numbers are clamped or dropped", lux.status.symbols == 9999 and lux.status.loh == nil
+        and lux.status.di == nil)
+    PallyPower("SELF zz@99", "Lux Aeterna")
+    check("a malformed plan changes nothing", ns.Blessings.Others()["Lux-Aeterna"].classes.WARRIOR == "might")
+    PallyPower("SELF 607010nnnnnn@111111111", "Stranger Danger")
+    check("a sender outside the group is not read", ns.Blessings.Others()["Stranger Danger"] == nil)
+    PallyPower("SELF 607010nnnnnn@111111111", "Holy Man")
+    check("a paladin running Naowh Forever keeps that plan", not ns.Blessings.Others()["Holy-Man"].pallyPower
+        and ns.Blessings.Others()["Holy-Man"].classes.WARRIOR == "might")
+
+    -- Later changes come as PallyPower's assignment messages, taken by the rules its own clients use.
+    PallyPower("ASSIGN Lux Aeterna 1 3", "Lux Aeterna")
+    check("a PallyPower paladin's own change is read", lux.classes.WARRIOR == "kings")
+    PallyPower("ASSIGN Lux Aeterna 3 2", "Holy Man")
+    check("someone else's is not, without the lead or Free Assignment", lux.classes.PRIEST == "wisdom")
+    PallyPower("FREEASSIGN YES | SYMCOUNT 12 | COOLDOWNS:n:n:n:n", "Lux Aeterna")
+    PallyPower("ASSIGN Lux Aeterna 3 2", "Holy Man")
+    check("with their Free Assignment on it is", lux.free and lux.classes.PRIEST == "might")
+    PallyPower("MASSIGN Lux Aeterna 1", "Lux Aeterna")
+    check("MASSIGN sets every class", lux.classes.WARRIOR == "wisdom" and lux.classes.SHAMAN == "wisdom")
+    PallyPower("PASSIGN Lux Aeterna@2n3nnnnnn", "Lux Aeterna")
+    check("PASSIGN sets each class", lux.classes.WARRIOR == "might" and lux.classes.PRIEST == "kings"
+        and lux.classes.ROGUE == nil)
+    PallyPower("AASSIGN Lux Aeterna 2", "Lux Aeterna")
+    check("an aura they have not learned is none", lux.aura == nil)
+    PallyPower("AASSIGN Lux Aeterna 1", "Lux Aeterna")
+    check("AASSIGN sets their aura", lux.aura == "devotion")
+    PallyPower("ASSIGN Holy Man 1 3", "Lux Aeterna")
+    check("a change for a paladin running Naowh Forever is left alone",
+        ns.Blessings.Others()["Holy-Man"].classes.WARRIOR == "might")
+    PallyPower("CLEAR SKIP", "Holy Man")
+    check("CLEAR SKIP clears a Free Assignment paladin's classes and keeps the aura", next(lux.classes) == nil
+        and lux.aura == "devotion")
+    PallyPower("FREEASSIGN NO | SYMCOUNT 12 | COOLDOWNS:n:n:n:n", "Lux Aeterna")
+    PallyPower("PASSIGN Lux Aeterna@2n3nnnnnn", "Lux Aeterna")
+    PallyPower("CLEAR", "Holy Man")
+    check("CLEAR from someone without the lead leaves the rest alone", lux.classes.WARRIOR == "might")
+    env.UnitIsGroupLeader = function(u) return u == "party1" end
+    PallyPower("CLEAR", "Holy Man")
+    check("CLEAR from the leader clears classes and aura", next(lux.classes) == nil and lux.aura == nil)
+    env.UnitIsGroupLeader = function() return false end
+    local asked = #sent
+    ns.Blessings.AskPallyPower()
+    check("once every paladin has a plan nobody is asked", #sent == asked)
+    ns.Blessings.AutoAssign()
+    local toLux = false
+    for i = asked + 1, #sent do
+        if sent[i]:find("Player-1-party2", 1, true) then toLux = true end
+    end
+    check("Auto-Assign plans the others but never sends a PallyPower paladin a plan", #sent > asked and not toLux)
+    account.blessingPreset = { ["Lux-Aeterna"] = { classes = { WARRIOR = "kings" } } }
+    check("a preset holding only a PallyPower paladin loads nothing", ns.Blessings.LoadPreset() == false)
+    account.blessingPreset = nil
+    units.party2 = nil
+    env.GetNumSubgroupMembers = function() return 1 end
+    local before = #sent
+    ns.Blessings.SendPlan("Lux-Aeterna", { WARRIOR = "wisdom" })
+    check("a plan for a paladin who has left is neither kept nor sent", #sent == before
+        and ns.Blessings.Others()["Lux-Aeterna"].classes.WARRIOR ~= "wisdom")
+    units.player[3] = "WARRIOR"
+end
+
+print(("PASS import safety: %d checks"):format(checks))

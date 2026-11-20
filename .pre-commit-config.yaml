@@ -1,0 +1,81 @@
+# Setup: .github/CONTRIBUTING.md, "Checks".
+exclude: ^Libs/
+default_install_hook_types: [pre-commit, commit-msg]
+default_stages: [pre-commit]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # frozen: v6.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-xml
+      - id: check-case-conflict
+      - id: detect-private-key
+      - id: trailing-whitespace
+      - id: check-added-large-files
+        args: [--maxkb=5120]
+      # No autofix: the right ending depends on the file.
+      - id: mixed-line-ending
+        args: [--fix=no]
+
+  - repo: https://github.com/Mateusz-Grzelinski/actionlint-py
+    rev: 805f85e558841bf4d852335e036b33d2b26be1cc # frozen: v1.7.12.25
+    hooks:
+      - id: actionlint
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: 06a39750ec31860bb44f2acf67182c40016cd1e7 # frozen: v1.32.0
+    hooks:
+      - id: zizmor
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: 33b50eb042bee26eac0ee96ad84aa9c1b4dccdd8 # frozen: v4.5.0
+    hooks:
+      - id: conventional-pre-commit
+        args: [feat, fix, perf, refactor, docs, test, ci, build, chore, revert]
+
+  - repo: local
+    hooks:
+      - id: luacheck
+        name: luacheck
+        entry: luacheck
+        language: system
+        types: [lua]
+
+      # Locales are rewritten by the release packager and stay LF.
+      - id: addon-crlf
+        name: addon files use CRLF
+        language: pygrep
+        entry: '(?<!\r)\n'
+        args: [--multiline]
+        files: \.(lua|toc|xml)$
+        exclude: ^Tools/|^Core/Locales/|^NaowhForever_([a-zA-Z]{4}|Locales)/[a-zA-Z]{4}\.lua$
+
+      # Translations and the generated BiS source names are the exceptions.
+      - id: addon-ascii
+        name: addon files are ASCII
+        language: pygrep
+        entry: '[^\x00-\x7F]'
+        files: \.(lua|toc|xml)$
+        exclude: ^Core/Locales/|^NaowhForever_([a-zA-Z]{4}|Locales)/[a-zA-Z]{4}\.lua$|^NaowhForever_BiS/BiS/Data/BiS\.lua$
+
+      # The release builds the search index; git keeps only its empty placeholder.
+      - id: search-index-placeholder
+        name: search index stays the placeholder
+        language: pygrep
+        entry: 'SEARCH_INDEX = \{\s*$'
+        files: ^NaowhForever_SearchIndex/SearchIndex\.lua$
+
+      # And the auction prices, the same way.
+      - id: auction-data-placeholder
+        name: auction data stays the placeholder
+        language: pygrep
+        entry: 'AuctionFeed = \{\s*$'
+        files: ^NaowhForever_AuctionData/Prices\.lua$
+
+      - id: toc-files
+        name: TOC files exist
+        language: python
+        entry: python Tools/hooks/check_toc.py
+        files: \.(toc|lua|xml)$
+        pass_filenames: false

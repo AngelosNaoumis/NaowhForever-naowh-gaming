@@ -1,0 +1,192 @@
+-- Run with Lua 5.1 from the repository root: the Total Craft Timer counts only the crafts your bags
+-- can pay for. Create x20 with no reagents shows no bar (the game refuses it and sends no cast
+-- events), and with reagents for 5 the bar counts 5. Loads CraftTimer.lua against stubs.
+local Load = dofile("Tools/regression/load_files.lua")
+
+local checks = 0
+local function check(label, value) assert(value, label); checks = checks + 1 end
+
+local RECIPE = 3946
+local boot, bar, events, craftHook, settingHook, stopHook, unlockHook, lockHook, saveHook
+local later = {}
+local casting
+local craftable = 0
+local now = 100
+
+local function Noop() end
+local frameMethods = {
+    GetAlpha = function(f) return f.alpha or 0 end,
+    SetAlpha = function(f, alpha) f.alpha = alpha end,
+    GetFrameLevel = function() return 1 end,
+    GetScale = function() return 1 end,
+    Show = function(f) f.shown = true end,
+    Hide = function(f) f.shown = false end,
+    SetText = function(f, text) f.text = text end,
+    SetScript = function(f, name, fn) f[name] = fn end,
+    RegisterEvent = function(f, event)
+        if event == "PLAYER_LOGIN" then boot = f end
+    end,
+    RegisterUnitEvent = function(f) events = f end,
+    SetPoint = function(f, point, rel, relPoint, x, y) f.x, f.at = x, { point, rel, relPoint, x, y } end,
+}
+local frameMeta = { __index = function(_, k) return frameMethods[k] or Noop end }
+local function Frame(_, name)
+    local f = setmetatable({ alpha = 1 }, frameMeta)
+    if name == "NaowhForeverCraftTimer" then bar = f end
+    return f
+end
+frameMethods.CreateTexture = function() return Frame() end
+
+local color = { r = 1, g = 1, b = 1 }
+local settings = { enabled = true, craftTimer = true, craftTimerFontSize = 14, craftTimerBgAlpha = 0.9 }
+local ns = {
+    L = dofile("Tools/regression/locale_stub.lua").L,
+    THEME = { bg = color, accent = color, accentSoft = color, fg = color },
+    Shared = { Parts = { HudFont = Noop } },
+    UI = { TexturePath = function() return "" end,
+        AttachMover = function(_, _, onMoved) saveHook = onMoved return Frame() end },
+    Solid = function() return Frame() end, Border = Noop, Font = function() return Frame() end, Apply = Noop,
+    Hairline = function(tex) return tex end,
+    Professions = {
+        Settings = { Get = function(k) return settings[k] end, Set = function(k, v) settings[k] = v end },
+        Style = { BORDER_RGB = color },
+        Widgets = { Crop = function(t) return t end },
+        Recipes = { Craftable = function() return craftable end },
+    },
+}
+function ns.OnApply(fn) local was = ns.Apply ns.Apply = function(...) was(...) fn(...) end end
+
+local blizzard, classic, ellesmere = Frame(), Frame(), Frame()
+blizzard.alpha, classic.alpha, ellesmere.alpha = 0.7, 0.5, 0.8
+
+local env = setmetatable({
+    PlayerCastingBarFrame = blizzard, CastingBarFrame = classic, ERB_CastBarFrame = ellesmere,
+    NaowhForever = ns,
+    UIParent = Frame(),
+    CreateFrame = Frame,
+    GetTime = function() return now end,
+    wipe = function(t) for k in pairs(t) do t[k] = nil end return t end,
+    UnitCastingInfo = function() if casting then return nil, nil, nil, nil, nil, nil, nil, nil, casting end end,
+    C_Spell = { GetSpellInfo = function() return { name = "Solid Dynamite", castTime = 5000 } end },
+    C_TradeSkillUI = { GetRecipeInfo = function() return { name = "Solid Dynamite", icon = 1 } end,
+        StopRecipeRepeat = Noop },
+    C_Timer = { NewTicker = function() return { Cancel = Noop } end, After = function(_, fn) later[#later + 1] = fn end },
+    hooksecurefunc = function(_, name, fn)
+        if name == "CraftRecipe" then craftHook = fn end
+        if name == "Set" then settingHook = fn end
+        if name == "StopRecipeRepeat" then stopHook = fn end
+        if name == "ShowUnlockMode" then unlockHook = fn end
+        if name == "HideUnlockMode" then lockHook = fn end
+    end,
+}, { __index = _G })
+env._G = env
+
+Load({ "NaowhForever_Professions/UI/CraftTimer.lua" }, env)
+boot.OnEvent(boot, "PLAYER_LOGIN")
+check("logging in hooks CraftRecipe", craftHook ~= nil)
+
+craftHook(RECIPE, 20)
+check("Create x20 with no reagents shows no bar", bar == nil or not bar.shown)
+
+craftable = 1
+craftHook(RECIPE, 20)
+check("reagents for one craft is not a batch", bar == nil or not bar.shown)
+
+craftable = 5
+craftHook(RECIPE, 20)
+check("reagents for 5 of 20 shows the bar", bar and bar.shown)
+check("and it counts 5, not 20", bar.labels[2].text == "0 / 5 crafted")
+
+craftable = 50
+craftHook(RECIPE, 20)
+check("plenty of reagents counts what was asked", bar.labels[2].text == "0 / 20 crafted")
+
+check("default behavior fades all supported cast bars", blizzard.alpha == 0 and classic.alpha == 0
+    and ellesmere.alpha == 0)
+settings.craftTimerShowCastBar = true
+settingHook("craftTimerShowCastBar")
+check("enabling during a batch restores original alpha", blizzard.alpha == 0.7 and classic.alpha == 0.5
+    and ellesmere.alpha == 0.8)
+bar.OnUpdate(bar)
+check("timer updates leave the cast bar visible", blizzard.alpha == 0.7)
+craftHook(RECIPE, 20)
+check("new batches keep both bars visible", bar.shown and blizzard.alpha == 0.7)
+settings.craftTimerShowCastBar = false
+settingHook("craftTimerShowCastBar")
+check("disabling during a batch fades the cast bars immediately", blizzard.alpha == 0)
+stopHook()
+check("stopping restores alpha and hides the timer", not bar.shown and blizzard.alpha == 0.7)
+settingHook("craftTimerShowCastBar")
+check("changing the option while idle leaves alpha alone", blizzard.alpha == 0.7)
+craftHook(RECIPE, 20)
+settings.enabled = false
+settingHook("enabled")
+check("disabling Professions restores alpha and hides the timer", not bar.shown and blizzard.alpha == 0.7)
+settings.craftTimerShowCastBar = true
+settingHook("craftTimerShowCastBar")
+craftHook(RECIPE, 20)
+check("the new option does not activate a disabled module", not bar.shown and blizzard.alpha == 0.7)
+settings.enabled, settings.craftTimer = true, false
+settingHook("craftTimer")
+craftHook(RECIPE, 20)
+check("the new option does not activate a disabled timer", not bar.shown and blizzard.alpha == 0.7)
+
+local function Near(a, b) return math.abs(a - b) < 1e-6 end
+local function PipsShown()
+    local n = 0
+    for _, pip in ipairs(bar.pips) do if pip.shown then n = n + 1 end end
+    return n
+end
+settings.craftTimer = true
+settingHook("craftTimer")
+craftHook(RECIPE, 5)
+check("a batch of 5 has a pip between each craft", PipsShown() == 4)
+check("the first pip sits where the first 5s craft should end", Near(bar.pips[1].x, 5 / 26.2 * 420))
+now = 106
+events.OnEvent(events, "UNIT_SPELLCAST_SUCCEEDED", "player", nil, RECIPE)
+check("a finished craft's pip stays where it finished", Near(bar.pips[1].x, 6 / 27.2 * 420))
+check("the next pip is one craft and gap later", Near(bar.pips[2].x, 11.3 / 27.2 * 420))
+craftable = 60
+craftHook(RECIPE, 60)
+check("a batch too long for its pips to read shows none", PipsShown() == 0)
+
+local function RunLater()
+    local due = later
+    later = {}
+    for _, fn in ipairs(due) do fn() end
+end
+craftHook(RECIPE, 5)
+events.OnEvent(events, "UPDATE_TRADESKILL_CAST_STOPPED", false)
+casting = RECIPE
+RunLater()
+check("closing the profession window mid-cast keeps the timer", bar.shown)
+casting = nil
+events.OnEvent(events, "UPDATE_TRADESKILL_CAST_STOPPED", false)
+events.OnEvent(events, "UNIT_SPELLCAST_START", "player", nil, RECIPE)
+RunLater()
+check("closing it between crafts keeps the timer once the next cast starts", bar.shown)
+events.OnEvent(events, "UPDATE_TRADESKILL_CAST_STOPPED", false)
+RunLater()
+check("no next cast after the stop ends it", not bar.shown)
+craftHook(RECIPE, 5)
+events.OnEvent(events, "UPDATE_TRADESKILL_CAST_STOPPED", false)
+casting = RECIPE
+RunLater()
+casting = nil
+events.OnEvent(events, "UNIT_SPELLCAST_SUCCEEDED", "player", nil, RECIPE)
+RunLater()
+check("cancelling mid-cast ends it once that cast finishes and no next one starts", not bar.shown)
+
+unlockHook()
+check("the HUD editor shows the timer with a sample", bar.shown and bar.mover.shown
+    and bar.labels[2].text == "4 / 10 crafted")
+check("on the Flight Timer's spot by default", bar.at[1] == "TOP" or bar.at[1] == "CENTER")
+saveHook({ point = "BOTTOM", relPoint = "BOTTOM", x = 10, y = 200 })
+settingHook("craftTimerPos")
+check("a move is saved as its own position", settings.craftTimerPos and settings.craftTimerPos.y == 200)
+lockHook()
+check("leaving the HUD editor hides the sample", not bar.shown and not bar.mover.shown)
+craftHook(RECIPE, 5)
+check("a batch shows where it was moved", bar.shown and bar.at[1] == "BOTTOM" and bar.at[5] == 200)
+
+print(("test-craft-timer-craftable: %d checks passed"):format(checks))

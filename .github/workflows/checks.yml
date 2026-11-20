@@ -1,0 +1,90 @@
+name: checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+
+  pre-commit:
+    name: pre-commit
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      # Ubuntu's lua-check is older and warns differently; use CONTRIBUTING's 1.2.0.
+      - name: Install luacheck 1.2.0
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q lua5.1 liblua5.1-dev luarocks
+          sudo luarocks install luacheck 1.2.0-1
+
+      - name: Run pre-commit on every file
+        run: |
+          pip install pre-commit
+          pre-commit run --all-files --show-diff-on-failure --color=always
+
+  tests:
+    name: tests
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Lua 5.1
+        run: sudo apt-get update -q && sudo apt-get install -y -q lua5.1
+
+      # Libs/ is not in git. -d: no upload, -z: no zip, -l: no localization fetch.
+      - name: Fetch Libs
+        uses: BigWigsMods/packager@01e8631a69c69d7654c788d152630d5fed9e3812 # v2.7.0
+        with:
+          args: -d -z -l
+
+      - name: Copy Libs into the checkout
+        run: cp -r .release/NaowhForever/Libs/. Libs/
+
+      - name: Run the regression tests
+        run: bash Tools/regression/run-all.sh
+
+      - name: Run the Python tests
+        run: python3 -m unittest discover -s Tools/tests
+
+  package:
+    name: package
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # As the release builds it (release.yml), so the zip check sees it.
+      - name: Build the search index
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q lua5.1
+          lua5.1 Tools/build/search_index.lua
+
+      # -d: no upload. -l: skip the localization fetch, which needs the release secrets.
+      - name: Package
+        uses: BigWigsMods/packager@01e8631a69c69d7654c788d152630d5fed9e3812 # v2.7.0
+        with:
+          args: -d -l
+
+      - name: Check the zip
+        run: bash Tools/hooks/check-package.sh

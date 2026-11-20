@@ -1,0 +1,469 @@
+# AuraBuffs
+
+Buff and consumable reminders, the Campfire and Low Health. Its settings page is
+AuraBuffs/Settings (`/nfbuffs`, its minimap and Top Bar button). Its on/off switches and their
+defaults come from `ns.FEATURES.auraBuffs`.
+
+- **Buffs & Consumables:** a row of icons for missing food, flask, elixir and scroll buffs, the Dire Maul
+  drinks, Jujus, Zanza and Blasted Lands items you carry (Other Buffs Reminder, off by default),
+  class buffs missing in your group, and your own class buff (armor, Inner
+  Fire, Battle Shout, poisons, a weapon imbue, a hunter's aspect) when it is missing, and the Cozy Sleeping Bag
+  out in the world when it is ready and Well-Rested is missing (Sleeping Bag Reminder, off by default), and the
+  Elemental Attractor in the world and dungeons while Magical Awareness is missing (Elemental Attractor Reminder,
+  on by default). Click one to use the item it
+  shows or cast the buff, or hover it to pick another carried item. Middle-click one to hide it until you
+  reload. The worn gear and fishing pole reminders moved to QoL > Loot & Items > Gear Reminders
+  (`NaowhForever_QoL/Loot/GearReminders.lua`).
+- **Campfire:** in two looks on one mover. Round, a camp icon with a time ring and a countdown;
+  Simple, a bar in the windows' backdrop with the campfire at its left, the camp's bonuses with
+  their amounts, and the time left on the right over a line that runs down green, yellow, then
+  red. Hovering it lists each bonus, the time left and when to refresh.
+  With no Camp Benefits it glows (LibCustomGlow) and its fire is grey. With a campfire in range the
+  fire lights up, the words say Click to sit, and a click on the fire or its words performs the
+  /sit emote (Round: the icon and the label under it; Simple: the whole bar); it glows brighter
+  under the mouse. Camp Nearby's fire does the same. With Round, while you carry the Cozy Sleeping
+  Bag and a campfire is in range (or you sit at one, or Always Show Sleeping Bag is on), a smaller
+  round Sleeping Bag icon sits at the fire's lower right (lower left while the buffs show on the
+  right); a click uses the bag. It hides with the fire (Show Only When Low, Show When Missing off)
+  unless Always Show Sleeping Bag is on. The HUD Editor moves it
+  on its own (Campfire Bag); Sleeping Bag Position on the card puts it back. While the
+  bag is on cooldown its icon is grey with a countdown. While its Well-Rested buff is on you, the
+  bag wears the fire's ring, in the accent blue, running down with the buff's time left, the time
+  in its middle and the stacks in its corner.
+- **Camp Nearby:** the same bar drawn bare (no backdrop, edge or line), larger by its own scale,
+  sized to what it says and stacked in the Alerts group (`ns.AlertStack`), with the camp's time
+  left inline after a dot while it still runs.
+- **Low Health:** the best healing item in your bags, with a LOW HEALTH warning, while your health
+  is under the threshold. With no healing item it stays hidden, unless Show When Out is on.
+
+## Layout
+
+```
+NaowhForever_Combat/AuraBuffs/
+  AuraBuffs.xml                every file, in load order, included by Combat.xml
+  AuraBuffs.lua                the settings (ns.AuraBuffSettings), the module table (ns.AuraBuffs, A),
+                               ns.CampBuffMode, A.Migrate
+  Constants.lua                the numbers several of its files share (A.C)
+  Data/
+    BuffReminders.lua          the spells and items behind the buff reminders (ns.BuffReminderData)
+    Campfire.lua               the camp auras and each camp feature's bonus, by spell ID (A.CampData)
+  BuffReminders.lua            which consumables and class buffs are missing (A.Buffs)
+  CampReader.lua               which camp bonuses you have, from their auras and Camp Benefits'
+                               tooltip, and their labels (A.Camp)
+  LowHealth.lua                the item to offer and the curve that shows it (A.LowHealth)
+  View/
+    Style.lua                  its look (A.Style), on top of Shared/Style.lua
+    Glow.lua                   a reminder's glow, Pixel or Standard, from its glow settings (A.Glow)
+    BuffCell.lua               a buff reminder icon (A.BuffCell)
+    CampIcon.lua               the campfire art and the Round look (A.CampIcon)
+    CampBar.lua                the Simple bar (A.CampBar)
+    CampAlert.lua              the Camp Nearby alert's look and fades (A.CampAlert)
+    LowHealthLook.lua          the Low Health icon and warning (A.LowHealthLook)
+  UI/
+    GlowRows.lua               the glow type, color and pixel look rows a card adds (A.GlowRows)
+    CampBag.lua                the Sleeping Bag beside the Round campfire or where it was moved, a secure button (A.CampBag)
+    Campfire.lua               the Campfire reminder and the Camp Nearby alert on screen
+    CampfireCards.lua          the Campfire and Camp Nearby cards, with their editable previews
+    LowHealth.lua              the Low Health icon on screen
+    LowHealthCard.lua          the Low Health card
+    BuffMenu.lua               the carried items a buff reminder offers, as secure buttons
+    BuffReminders.lua          the buff reminder row on screen
+    BuffsCard.lua              the Buffs & Consumables card
+  Media/CampfireHD.tga         the campfire icon's art (View/CampIcon.lua)
+  README.md                    this file
+```
+
+## Why
+
+- Every icon in the row does something on a click. A consumable uses its item. A poison, stone or oil
+  goes on the weapon that lacks one (`ItemBar.SetWeapon`: the item, then `/use` on that slot, since
+  using it alone only asks which item to put it on); a right-click puts it on the other hand, and the
+  hover menu's items go on the same weapon. A rogue's Poisons reminder uses the best poison carried
+  (`D.POISON_ITEMS`, the strongest first) and offers the rest in the menu; with none carried it does
+  nothing. A personal buff casts its spell on you (`unit1 = "player"`; with no unit the secure button
+  casts on whatever is targeted, so Thorns went on a targeted friend or NPC), Hunter's Mark on the
+  target, and a raid buff you know is
+  cast on the first group member missing it, read when the row last refreshed, out of combat. A raid
+  buff only another class can cast does nothing.
+- Left-Click Main Hand (`leftClickMainHand`, off by default) is Volo's: a left-click always goes on the
+  main hand and a right-click on the off hand, on the row and in its menu. Without it the clicks follow
+  the hand that lacks one, so once the main hand was done the right-click moved onto it and replaced its
+  poison. While it is on, the menu's items say which click is which.
+- In combat the client refuses addons the player's auras outright (`GetAuraDataByIndex` errors,
+  `GetPlayerAuraBySpellID` returns nil with the buff up), and it withdraws them at boss pulls
+  before `InCombatLockdown()` turns true. Every read is gated on
+  `C_Secrets.ShouldAurasBeSecret()`, and the reminders keep what they last showed until combat
+  ends, or they would read every buff as missing. `InCombatLockdown()` is still false while
+  `PLAYER_REGEN_DISABLED` is handled, so that event is checked too.
+- A `UNIT_AURA` unit arrives secret while auras are restricted; `PLAYER_REGEN_ENABLED` catches up.
+- `GetAuraDataByIndex` builds a new table per aura, so a refresh that read every member's buffs
+  made about 550 KB of garbage in a 20-player raid. Each unit's buffs are kept (`fresh`) until a
+  `UNIT_AURA` for that unit, marked before the combat and secrecy checks so a change mid-fight still
+  counts; a secret unit, `GROUP_ROSTER_UPDATE` (tokens can name someone else), leaving combat, a
+  loading screen and re-listening read everyone again, and a member out of sight, offline or dead is
+  read again when back. An aura's expiry is an absolute time, so a kept table does not go stale on its
+  own. Blizzard's raid frames also read a member's auras again only on their `UNIT_AURA`, per token.
+- A personal buff cast while the row is frozen (Lightning Shield recast mid-pull) fades its reminder to
+  alpha 0, the one change a secure cell allows in combat, read from the `UNIT_SPELLCAST_SUCCEEDED`
+  spell ID when it is not secret; the next refresh puts the alpha back. Hunter's Mark fades on any cast
+  of it, since a mark goes on an enemy.
+- Thorns (`others`) and a raid buff may have gone on someone else, so they fade only on a cast known to
+  be yours:
+  - one cast from the reminder itself. `UNIT_SPELLCAST_SENT` fires during the secure click, so the
+    cell's PostClick in the same frame claims that castGUID, and the click casts on you (`unit1 =
+    "player"`) or on the member missing. A raid buff fades on its claimed cast only when one member was
+    missing (`single`).
+  - one sent at you, when SENT's `target` is readable (it is `ConditionalSecret`) and is your name. A
+    raid buff fades on that only while solo (`solo`).
+- Thorns Only on Tank (`thornsTankOnly`, off by default) is Robin's ask. Solo, Thorns reminds you of your
+  own, as before (Hide While Resting still applies). In a group it reminds you only of the tanks (the Tank
+  role or a raid main tank, `IsTank`): a click casts it on the first tank missing it, with the count when more
+  than one is. A group with no tank gets no Thorns reminder, Robin's call: EllesmereUI's raid frames fall back
+  to you there. A tank offline, dead or out of sight cannot be read or reached, so it shows nothing. While it is on, the row follows every group member's `UNIT_AURA`,
+  `GROUP_ROSTER_UPDATE` and `PLAYER_ROLES_ASSIGNED`, as Raid Buff Reminders do. A cast at you fades it
+  only when you are the one tank missing it (`solo`).
+- A weapon reminder fades once every weapon it covers is enchanted (`MissingSlot`), re-read on
+  `WEAPON_ENCHANT_CHANGED` and `UNIT_INVENTORY_CHANGED`: a poison on one hand leaves the other's.
+  `C_Item.GetWeaponEnchantInfo` returns no secrets.
+- The reminders watch the built-in consumables only (`D.DEFAULT_GROUPS`): Naowh had the hand-made list
+  and its window removed. A list an older profile still holds (`utilityReminders.consumables`, the
+  profile string's old Consumables part) is left in place and not read.
+- Food counts any Well Fed: every cooked food's buff is named Well Fed, whatever it raises, so it is
+  matched by the name of `D.WELL_FED[1]`.
+- A carried item's icon, in the row and its menu, is the cached item's own (`GetItemInfo`,
+  `R.ItemIcon`); uncached, it is the one the game has for the ID, the item is asked for once, and its
+  `ITEM_DATA_LOAD_RESULT` draws the row again.
+- Consumables (with the weapon enhancement reminder), raid buffs and personal buffs each have World,
+  Dungeons and Raids switches, read from `IsInInstance()`: a party instance is a dungeon, a raid
+  instance a raid, and anything else (the world, battlegrounds, arenas) the world, as the old Show In
+  choice treated it. `PLAYER_ENTERING_WORLD` fires through every instance's loading screen, so it
+  is enough to follow the place. There is no In Combat switch: the row does not refresh in combat,
+  and its buttons are secure, so it cannot be hidden then.
+- Hide in the World at Level 60 (`consumablesMaxHide`, `raidBuffsMaxHide`, `personalBuffsMaxHide`, off by
+  default) is Robin's: while levelling you want the reminders out in the world, at 60 maybe only in dungeons and
+  raids. From level `MAX_LEVEL` (60, Forever's cap) it hides that kind in the open world only: battlegrounds and
+  arenas, which the World switch also covers, keep following it, and Dungeons and Raids are left alone.
+  `PLAYER_LEVEL_UP` is listened for only while one of them is on and you are under 60, and its new level is
+  used, since `UnitLevel` can still read the old one around that event.
+- `A.Migrate` turns the old Show In choice (`consumablesWhere`) into the three consumables switches
+  on every Apply and clears it, so an old profile string is moved too: Everywhere is all three,
+  Dungeons & Raids the last two, Raids Only raids alone. Hide While Resting still applies on top.
+- Group auras change in bursts, so a buff refresh waits `QUEUE_DELAY` and covers the lot. Nothing
+  fires as a buff runs down, so the earliest one to cross the warning time is timed.
+- Show Buff Range starts off. When enabled, raid buff reminders show confirmed recipients in
+  casting range over the eligible members missing that buff. The check uses a learned rank of
+  that family's spell. A missing buff on yourself is in range; an unknown, secret or unavailable
+  result is unconfirmed, contributes zero, and never adds an unknown label. With none confirmed,
+  the icon dims to `BUFF_RANGE_DIM` and its glow stops. Other reminder icons keep their usual look.
+- `SPELL_RANGE_CHECK_UPDATE` / `C_Spell.EnableSpellRangeCheck` only track the current target.
+  Group movement across a buff's casting range therefore uses a narrow exception to event-only
+  updates: a `RANGE_INTERVAL` (0.5 seconds) ticker checking only cached missing recipients, without
+  rescanning auras or bags or rebuilding the row. It exists only while range tracking is enabled
+  and a visible reminder has a learned spell and another missing group member. It stops on combat,
+  disable, Unlock Mode or no remaining reminders; restriction transitions freeze reads. Self-only
+  and uncastable buffs need no ticker. Aura and roster events still rebuild the missing lists.
+- Hide Out of Range starts off and needs Show Buff Range. A raid buff with a learned spell and
+  none confirmed in range is left out of the row instead of dimmed, so a party member far off
+  while questing shows nothing. An uncastable buff cannot be confirmed, so it stays dimmed rather
+  than hidden for good. When a tick sees a buff cross between hidden and shown it queues a normal
+  refresh, the only time the ticker rebuilds the row.
+- `ELIXIR_ICON` (13454, Greater Arcane Elixir) stands for "no elixir at all" in the preview.
+- The preview's raid buff (Unlock Mode and the card) is the first picked one the reminders would track for you
+  (`A.Buffs.RaidSample`): one you know, or with Only Buffs I Can Cast off any non-talent one. With Raid Buff
+  Reminders off, or none that applies, it shows none, so a warrior no longer sees Arcane Intellect.
+- Two classic elixirs for the same stat do not stack, so one of each group counts. Elixirs of different stats
+  do stack on Forever (Robin), so with the pick on each carried stat is its own icon while its buff is missing
+  (`Elixirs` over `D.ELIXIR_AURAS`, `MAX_ELIXIRS` = 3 until the real limit is known), each menu still holding
+  every carried elixir; with the pick off, any elixir is one reminder as before. Forever keeps the classic IDs for flasks, elixirs, scrolls and class
+  buffs; cooked food moved to Forever-only "Nutritious Food" spells with one shared Well Fed aura
+  per stat (Wowhead's Forever data, build 1.60.1). Flask of Petrification is left out: it is a
+  minute of stone form, not a buff to keep up.
+- Forever adds flasks and elixirs of its own: the four Natural flasks, the elixirs from 250328 to
+  250354 (Mageblood, Cleric's, Spirit and the rest) and a few more, in the client's tables since
+  its first beta build (1.60.1.69876), with each item's buff read from wago.tools build
+  1.60.1.70862. Draughts (water breathing, detection) are left out, and so are the Endless elixirs
+  that arrived in 1.60.1.70840: they stack with themselves and nothing is known yet of where they
+  come from.
+- Hide Blessings on Paladins (`hideBlessingsOnPaladin`, off by default) suppresses both paladin
+  raid reminder families while the player is a grouped paladin, since
+  the Blessings tab already covers them. It keeps the saved picks and does not hide the Blessing bar.
+  Leaving the group, turning the option off, or playing another class restores the selected reminders.
+- Paladin blessings start off in the raid buff picks: the Blessings module covers them. Salvation is a raid
+  buff of its own, since it stacks with the other blessings: a member with only Salvation still lacks a blessing,
+  and one with only a blessing still lacks Salvation. It skips members whose assigned role is Tank (a secret
+  role counts as not a tank), and is off until picked like the rest. A talent
+  buff (Divine Spirit) only counts when you can cast it, since another player's talents cannot be
+  seen. A camp buff standing in for a class buff is not seen, so it still counts as missing.
+- Personal buffs (`D.PERSONAL`) fire only for the player's class and once a spell of the family is
+  known, so a talent buff (Shadowform, Trueshot Aura, Water Shield) waits for the talent. Any spell
+  of a family counts as up: Frost, Ice or Mage Armor all satisfy the mage. The icon is the first
+  known spell, so families list the best first. Forever adds its own IDs: Trueshot Aura 1299346 and
+  1299348, Water Shield 408510 (the TBC IDs do not exist), Fel Armor 403619 (Wowhead dataEnv=16,
+  2026-10-11; not yet checked in the client).
+- Spell IDs (`personalBuffExtra`, empty by default) is ian's ask: Soul Link and Burning Shadow had no
+  reminder. Each ID is a personal buff of its own, read from the text as the PvP card's Spell IDs are, and it
+  reminds only once that spell is known, so a profile shared with another class shows nothing there. Its buff
+  counts as up by its ID or by the spell's name (`C_Spell.GetSpellName`): a spell's buff can carry an ID of its
+  own, and the name is the client's, in its language. A click casts it on you; a cast of it fades the icon in
+  combat. It follows the personal buffs' switches, Hide While Resting and Warn With Seconds Left. Under the
+  box, each typed spell has its own Your Spell row with its name and ID and a Remove button, so a number no
+  longer recognised can be taken out without reading the box; the card's rows are fixed when it is built, so
+  there are `MAX_TYPED` (8) of them, hidden while unused, and any past the eighth is edited in the box.
+- Poisons and imbues are weapon enchants (`C_Item.GetWeaponEnchantInfo`, which lists
+  several per weapon with the empty ones first: Windfury is its second entry, where the old
+  `GetWeaponEnchantInfo` global reads only the first). A weapon holds a poison or imbue (`Imbue`) and a
+  stone or oil (`Temporary`) at once, so each reminder counts only its own `enchantType`: counting any
+  enchant let a stone clear Poisons, and Randy's rogue never saw a stone reminder. Nothing reliable fires
+  when one runs out (Blizzard's own display polls), so its expiry is timed. Poisons check every equipped weapon, imbues the main hand. An enchant
+  reported with no time left counts as up and times nothing.
+- Weapon Imbue's family lists four different enchants (Windfury, Flametongue, Frostbrand,
+  Rockbiter), not ranks of one, so "the first known spell" picked the wrong icon once a shaman
+  trained more than one. `UNIT_SPELLCAST_SUCCEEDED` remembers the last one actually cast
+  (`lastImbue`) and the icon follows that instead, falling back to the first known spell until a
+  cast is seen.
+- The glow of a reminder (the buff icons, the Campfire's refresh reminder, Low Health) is Pixel Glow or
+  Standard Glow, both LibCustomGlow's. Standard is its ButtonGlow, the action button spell alert: Blizzard's
+  own `ActionButtonSpellAlertManager` only drives action buttons. Each feature has its own switch
+  (`buffGlow` off by default, `campGlow` and `lowHealthGlow` on as before), type, color, and for Pixel Glow lines,
+  thickness and speed. Speed is 1 to 8 as in EllesmereUI, the march taking `9 - speed` seconds, so 5 is the
+  four seconds the Campfire and Low Health glows always had; the default type, red color, eight lines and
+  thickness 2 are what they drew before. `Glow.Set` restarts a glow only when its settings or the icon's
+  width changed.
+- With Only If I Carry One off, food, flasks and elixirs still get a reminder: any Well Fed, flask or elixir of the
+  classic lists in `D.DEFAULT_GROUPS` (no battle/guardian split on Forever, so one elixir reminder, Battle
+  Elixir). Food has no item list, so the bags are read for it as with the pick on (`D.FOOD_SPELLS`) and the best
+  buff food carried is offered: once the hand-made list was gone, Drjay's food reminder showed while he carried
+  food, but a click ate nothing. Food's icon is the carried item's, else the last buff
+  food eaten (`lastFoodIcon` in the account settings, taken on `UNIT_SPELLCAST_SUCCEEDED` from the bag item
+  with that use spell, else the spell's own texture), else Well Fed's. Weapon Enhancement Reminder (off by default) asks for a stone or
+  oil (`D.WEAPON_ITEMS`) on each equipped weapon, an off hand only when it is a weapon, alongside a class's own
+  poison or imbue reminder. Its icon is the carried item's, else a Rough Sharpening Stone (`D.WEAPON_ICON_ITEM`),
+  and each stone, weightstone and oil shows its classic icon (`D.WEAPON_ICONS`, a texture path per item ID, here and in
+  the hover menu) rather than the client's item icon: Naowh asked for classic-looking icons, and the first oil in the
+  list has a modern one. The IDs and icon names are Wowhead Forever's (2026-10-14), which match Classic's.
+  A weapon item saved as Last Used before that (the client's item icon) is turned into its classic icon the
+  first time it is shown, or forgotten when no stone or oil has it. `ItemIcon` returns the classic icon for these
+  items, and Last Used finds the carried item by it, so the row, the item a click uses and the menu agree.
+- Sleeping Bag Reminder (`sleepingBag`, off by default) is Robin's ask: the Campfire's bag shows only at a
+  campfire, but the bag works anywhere. It shows in the open world only (`zone == "none"`), never while
+  resting, dead or at level 60, while the bag is carried, its cooldown is over and Well-Rested (429959) is
+  missing or under `BAG_WARN_MINUTES` (15). It has its own switch, not the Consumables World/Dungeons/Raids
+  ones: consumables are off in the world by default, and the bag is only for the world. The Campfire's bag icon
+  stays as it is.
+- Elemental Attractor Reminder (`elementalAttractor`) is Robin's ask, and on by default at the maintainer's call:
+  only someone carrying the item sees it. The Elemental Attractor (281371) and the Arcane Censer (275730) both
+  give Magical Awareness (1297774, two hours), which lets you collect Motes of Unstable Magic. Neither is used up,
+  so it shows only while one is carried (`D.ATTRACTOR`). It has its own switch, not the Consumables
+  World/Dungeons/Raids ones, because consumables are off in the world by default and the motes are out there.
+  It shows in the world and dungeons only (`ATTRACTOR_ZONES`): not raids, battlegrounds or arenas. Warn With
+  Minutes Left and Hide While Resting apply as for consumables.
+- No event fires when the bag's hour-long cooldown ends or Well-Rested drops under 15 minutes, so both are a
+  wake (`Wake`). One of `GCD` (1.5 s) or less is the global cooldown, not the bag's; a secret cooldown shows
+  nothing. A cooldown's start is 32-bit milliseconds, so one from before a PC restart reads `TIME_WRAP`
+  (2^32 ms) ahead of `GetTime()` and is brought back by that much; unfixed, the wake's timer was refused as
+  too long, an error on every refresh. Using the bag starts its cooldown: `BAG_UPDATE_COOLDOWN` fires on every global cooldown, so it
+  refreshes the row only while the bag shows and is now on cooldown (`R.BagBusy`). Level 60
+  (`PLAYER_LEVEL_UP`, through `WatchesLevel`) and dying or coming back (`PLAYER_DEAD`, `PLAYER_ALIVE`,
+  `PLAYER_UNGHOST`) refresh it too, registered only while it is on.
+- With Only If I Carry One on (the default), Robin asked for reminders only while you have the item. So a kind
+  shows when an item of its `D.DEFAULT_GROUPS` list is carried (buff food is any bag item whose use spell is in
+  `D.FOOD_SPELLS`), with that list's auras counting as up. The item offered is the highest required level you can
+  use, the rest following in the hover menu. The bags are read once after `BAG_UPDATE_DELAYED` or
+  `PLAYER_ENTERING_WORLD`, not on every refresh. Weapon Enhancement Reminder works this way on `D.WEAPON_ITEMS`.
+- A scroll reminds only while you carry one, with Only If I Carry One on or off (`carried` on their
+  `D.DEFAULT_GROUPS` entry): Robin expected a carried scroll to remind like food, but a reminder for scrolls you
+  do not have would nag everyone. Each stat is its own buff, so `FamilyGroup` offers the first carried
+  scroll whose stat is missing, not any scroll. A scroll does not stack with the class buff of its
+  stat (`raid` on `D.SCROLLS`: Arcane Intellect, Power Word: Fortitude, Divine Spirit), so
+  `D.SCROLL_AURAS` counts that buff as the scroll's.
+- An elixir does not remind while a stronger scroll of its stat is up, nor a scroll while a stronger elixir is
+  (`D.OUTRANKED_BY`, from the `amounts` on both lists; Armor elixirs pair with Protection scrolls through `scroll`):
+  ren0m could not drink a +4 Minor Agility elixir over a +9 Scroll of Agility II, as the game refuses the weaker
+  buff. Only Agility was seen in game; Strength, Intellect, Spirit and Armor are assumed to follow the same rule.
+  The amounts are the client's SpellEffect base points (build 1.60.1.70938).
+- Other Buffs Reminder (`otherBuffs`, off by default) is Robin's ask: Kreeg's Stout Beatdown, the stamina drinks
+  (Gordok Green Grog and the Rumsey Rums), Juju Power, Might and Guile, Zanza and the five Blasted Lands items
+  (`D.OTHER`). They stack with elixirs, so they are a kind of their own: in the elixir group, Kreeg's would have
+  hidden the Mageblood reminder. Like scrolls it reminds only while one is carried, one family at a time
+  (`FamilyGroup` over `D.OTHER_AURAS`), and follows the Consumables World, Dungeons and Raids switches. A family
+  is the buffs that replace each other: the stamina drinks, and Zanza (its tooltip says one at a time). Juju
+  Power counts Elixir of Giants as its buff and Juju Might Winterfall Firewater, which they do not stack with in
+  classic; Forever's stacking is unconfirmed. Juju Ember and Chill (ten minutes of resistance for one fight) and
+  the Permanent Zanzas (no known source) are left out. It is outside `CATEGORY_ORDER`, so it has no Only If I
+  Carry One pick and no Last Used icon: it always needs one carried, and its families mix.
+- Only If I Carry One is set per kind (`carriedPicks`: food, flask, battle, weapon): Drjay
+  wanted buff food to remind him with none in his bags, without flasks and elixirs showing all the time too. A kind
+  with no pick follows the old single switch (`onlyIfCarried`), so profiles from before keep what they did.
+  Scroll has no row: it always needs one carried, so its switch did nothing.
+- Consumables to Remind switches a kind off (`consumablePicks`: food, flask, scroll, battle): Kali wanted the
+  other reminders without the scroll one, and a middle-click hides it only until a reload. The HUD Editor's
+  sample keeps every kind, so the row can be placed with all of them off.
+- Icon (Default or Last Used): Last Used shows the icon of the flask, elixir, scroll or weapon item
+  used last (`lastIcons` in the account settings, food's is `lastFoodIcon`), taken from the item whose
+  use spell `UNIT_SPELLCAST_SUCCEEDED` reports; a spell no built-in item uses is ignored, and
+  nothing is read in combat. The cast event is listened for only while personal buffs are on, Last Used
+  is chosen or food needs it (Only If I Carry One off for food). Icon Size defaults to 48 and goes to 96; a profile that saved a
+  size keeps it. The row is sized to its icons and anchored by its centre, so reminders spread left
+  and right of the saved spot, and one sits on it.
+- Warn With Minutes Left covers personal buffs too, until Warn With Seconds Left is set, except a buff
+  no longer than the warning (Battle Shout's 2 minutes), which would otherwise show the moment it is
+  cast. Poisons last 30 minutes and Forever's imbues 60, past the slider's 10.
+- Warn With Seconds Left (`personalBuffsSeconds`) is Yaou's: a 3 minute Battle Shout is longer than the
+  2 minute warning, so it reminded a minute after the cast. It starts `false`, which follows Warn With
+  Minutes Left (`A.Buffs.PersonalWarn`), so profiles keep what they did. It goes up to the minutes slider's 10,
+  so the value it follows always fits on it.
+- The card lists every class's personal buffs, the player's own class first: its label in the class
+  color, the others grey with the class named in its color beside the switch. Picks are stored under
+  the buff's own key (`personalBuffPicks.demonArmor`), so a Warlock buff switched off on a Priest is
+  ready for the Warlock; every personal rule checks `family.class` against the player's class, so
+  none fires for another class. Raid buff picks are not greyed: another class's raid buff fires when a
+  group member of that class can cast it. A class with no personal buff (paladin) still gets the
+  group for the others.
+- Hunter's Mark is asked for only with a hostile elite, rare elite or boss targeted, read from the
+  target's debuffs. Unlike the others it fades when combat starts: in combat the target can change and
+  another hunter can mark it, and neither can be read, so a held icon asked for marks already up (Robin).
+- Aspect: any aspect counts, so Cheetah or Pack while travelling does not remind. Another hunter's
+  Pack or Wild lands on you too, so the family is `own`: only an aura whose `sourceUnit` is the
+  player counts. The IDs are every rank Forever has, from the Training data (game build
+  1.60.1.70178), names checked on Wowhead's Forever spells: Forever adds Aspect of the Beast ranks
+  2 to 4 (1299445 to 1299447), and 25296 is Hawk rank 7, from a book. The best Hawk comes first,
+  so the icon is Monkey below level 10. Mounted or not makes no difference, as for every reminder.
+- The buff menu holds secure buttons, so it can only be hidden outside combat. It uses
+  `IsMouseOver` on the frame: the old `MouseIsOver` global is gone from the game.
+- The buff menu's icons are `MENU_CELL` (32), whatever the row's Icon Size: Naowh found them too big
+  at the row's size. They sit centred under the icon you hover and spread both ways, each line of
+  them centred too. With no room under the icon it opens above it; the screen clamp keeps it in at
+  the sides. The icon size and every gap, in the row and the menu, are rounded to whole pixels
+  (`Cell.Snap`): at a UI scale where a unit is not a whole pixel, an icon a fraction of a pixel off
+  was resampled and looked rougher.
+- The row's icons are secure item buttons (`type1 = "item"`), each using the carried item it shows
+  (under Last Used, the carried one with that icon; when no carried item has it, the row shows and
+  uses the first carried item instead); a class or raid buff icon uses nothing. Secure buttons make the row
+  protected, so in combat nothing touches it: a refresh waits, and a setting change or Unlock Mode
+  is applied once combat ends (`PLAYER_REGEN_ENABLED`), registered only while the row is on or
+  showing.
+- The row's and the menu's icons take the flat hover and pressed look (`Parts.Press`), as the
+  Consumable Bar's do. A press used to start a second, faster Pixel Glow over the reminder's own, so
+  the glow seemed to speed up; the pressed look replaced it. The menu closes when the click is let
+  go: the buttons take both the down and the up, and the item may be used on either.
+- Middle-click hides a reminder for the session: its key (the consumable kind, `weapon`, or the personal
+  or raid buff family's own table) goes in a table that is never saved, and `Collect` leaves it out.
+  A reload or relog brings it back. The secure buttons set only `type1`, so a middle click uses nothing;
+  `PostClick` sees both its down and its up and acts on the up. In combat the row holds, so the icon goes
+  once combat ends. There is no switch: it costs nothing until clicked.
+- The row's and the menu's icon edges take the theme's Borders & Lines color (`ns.ThemeTint`), and
+  stay black with the default theme.
+- Camp Benefits (1229741, probed 2026-09-19), Campfire Nearby (1283391, the area aura in range of
+  a campfire, 2026-09-24) and Welcoming Campfire (1229739 and the crafting 1289723, the 60 second
+  aura while sitting, before Camp Benefits lands, 2026-09-25) were probed on the client.
+- Camp Benefits is earned in the open world, so dungeons, raids and battlegrounds never nag about
+  it.
+- The bonuses come from the hidden aura each camp feature puts on you, by spell ID, and for the
+  rest from Camp Benefits' tooltip (wago.tools build 1.60.1.70205), in `FEATURES` order with no
+  feature twice. One tooltip line per feature, matched by the feature's name as the client spells
+  it, its numbers read in the description's order (the Lute's armor, stats, resistances; the Mana
+  Well's mana, then its 5 seconds). The tooltip is kept once per Camp Benefits as soon as a read
+  finds anything; an empty read is tried again at most every `LINE.RETRY` seconds.
+- A tooltip line is named after the camp object (Rueda de afilar), never the bonus aura (Fuerza
+  extra), and the object's Tier 1 craft spell (`craft`) has that name in each client language
+  (wago.tools build 1.60.1.70840). The English `aliases` alone left every other language
+  unread. First Aid Kit's line is the exception in German (Sanitaetskasten, its spell Verbandtasche)
+  and Traditional Chinese, so those two names are among its aliases, as byte escapes. French puts a
+  no-break space before the colon, which `%s` does not match (`LINE.NO_BREAK`).
+- The Round countdown and ring use `SetCooldownFromExpirationTime` with the aura's deadline and
+  full duration. A buff that was already running before login can have a negative reconstructed
+  start, so it is not handed to the cooldown's start-time setter. Missing, zero or expired
+  deadlines leave the countdown hidden until an aura update supplies a valid one. Simple keeps
+  its duration-backed timer line.
+- The time ring's color by time left: green above 30 minutes, yellow above 5, red below. Nothing
+  fires as the buff runs down, so each color change is timed, and a generation number throws away
+  a timer armed for an older state.
+- Show Active Camp Buffs (Off, Always, On Mouseover): a profile that never picked one follows the
+  old on/off switch (`campBuffs`), so nobody's setting changes. On Mouseover the buff lines stay
+  written but invisible until the icon is hovered, and the icon only takes the mouse then, so
+  clicks and camera drags otherwise go through.
+- Sitting is a click on the fire, not a second icon: a button beside the reminder doubled its size
+  for one emote. The click only takes the fire's own square, so Camp Nearby still lets every other
+  click through, and only while a campfire is in range, the only time /sit can refresh the camp.
+  A lit fire with no Camp Benefits is the hint: grey says no camp, lit says a fire is here to sit at.
+- The Sleeping Bag icon is part of the Campfire, with no switch of its own: Jason's call. Its ID is
+  `ns.Shared.Items.SLEEPING_BAG`, the one Discovery's chain uses, since either addon can load
+  without the other. It shows only out of combat, with Round, in the open world, while the bag
+  is carried (`C_Item.GetItemCount`, read again on `BAG_UPDATE_DELAYED`) and Campfire Nearby or
+  Welcoming Campfire is on you. Always Show Sleeping Bag (`campBagAlways`, off) drops the campfire
+  condition, for Scofield (2026-11-15): players want the Well-Rested time after leaving the fire.
+  Near a campfire, with Always Show off, the bag follows the fire's own visibility (Show Only When
+  Low, Show When Missing), for Vorda (2026-11-16): it stayed on screen beside a deployed camp while
+  the fire waited for its 2 minutes.
+- The Sleeping Bag button is secure (`type1 = "item"`) so a click uses the bag. It is parented to
+  UIParent and placed at screen coordinates worked out from the fire's centre, never anchored to
+  the fire: a secure child or anchor would make the fire a protected frame, and the fire is shown,
+  hidden and moved in places that can run in combat. So in combat the button is left as it was; a
+  change that should hide it waits for `PLAYER_REGEN_ENABLED`, registered only then. Its size and
+  font are applied on the next refresh out of combat after a setting change.
+- Moved in the HUD Editor, the bag keeps its own spot (`campBagPos`) and no longer follows the fire.
+  With none it is placed beside the fire again on each of the fire's `SetPoint`, so dragging the
+  Campfire in the HUD Editor carries it along. While it follows, it tells the HUD Editor so
+  (`UI.SetMoverFollows`): a Campfire drag would otherwise snap to the bag, which sits on the fire's
+  bottom edge. Like the Campfire it cannot be anchored there (`ownAnchor`): an anchor and the
+  follow would both move it. Its element is the Campfire Bag: the HUD Editor keys elements by name,
+  and Discovery's tracker is already the Sleeping Bag. The HUD Editor shows it whenever it is
+  carried, with or without a campfire in range; leaving it hides the bag's plate at once, even in
+  combat, as the plate is not a protected frame.
+- Undo, Revert and layouts never put the bag back beside the fire: they keep only elements placed
+  on the screen centre, and a following bag is placed from the fire. Sleeping Bag Position does.
+- `CAMP_BAG_SCALE` makes the bag about half the fire, as in Jason's mockup; `CAMP_BAG_FALLBACK_ICON`
+  is the question mark, shown until the client has the bag's icon.
+- Well-Rested (429959, read in game 2026-10-20) is the bag's stacking buff: three stacks, two
+  hours. The bag's use spell, Unroll Bag (429961), only places the bag. While Well-Rested shows,
+  the cooldown keeps its grey and swipe but hides its numbers, so the middle is the buff's time.
+- The bag's cooldown is `C_Container.GetItemCooldown`, read on each refresh and on
+  `BAG_UPDATE_COOLDOWN`; one of `GCD` (1.5 s) or less is the global cooldown, not the bag's. One
+  timer per cooldown end shows it ready again, since no event fires when a cooldown runs out.
+  `BAG_UPDATE_COOLDOWN` fires on every global cooldown, so the two bag events update only the
+  bag, not the whole Campfire, and are registered only while Round is picked.
+- The bag's icon is set with a plain `SetTexture`, never through `Parts.Smooth`: a game icon file
+  (134400) loaded with the TRILINEAR filter crashed the Forever client on its disk thread.
+- The Round icon's plate follows the theme's Panels color (`ns.ThemeTint`), and a black circle one
+  pixel wider behind it is its 1px round border. The black disk extends past the time ring on both
+  sides, edging it.
+- The Simple bar: nothing draws outside it, so it can sit anywhere. Every state keeps the fire, the
+  words and the bar's size the same; the down states leave the time's place empty. It is never
+  narrower than four wide bonuses need at its text size (`CAMP_MIN_LABELS`), and its text never
+  under 11. `FONT_LIFT` raises its words: the Naowh font sits low. Its fire has no plate or ring:
+  the art (transparent round its fire) sits on the bar's own backdrop, `CAMP_ART_CROP` trimming its
+  empty margin so the fire fills the square. `Parts.LabelRow` sets the Addon Font on the labels it
+  makes, so the bar's font goes on after.
+- Both looks keep the fire on one screen spot: Round's centre is the Simple fire's centre. The saved
+  spot is LEFT for Simple and CENTER for Round (an older corner point is the Round icon's),
+  converted to the current style once, when placed, from the settings alone. A setting change
+  refilters the last bonuses read (`FilterBar`), so the bar repaints in every state, resting too.
+- Camp Nearby shows when a campfire is in range and the camp needs a refresh: no Camp Benefits, or
+  less than Alert Under left. With Simple it shows only while Camp Benefits is still up and low:
+  once it is gone, the bar's own Camp Nearby pill says it. It fades in, breathes and fades out
+  through animation groups, never OnUpdate. With no background its words keep the card's shadow.
+  `UNIT_AURA` fires often, so its timer is only set again for a new expiry, and a new Alert Under
+  disarms the old one.
+- Right-click (or Ctrl-click) hides Camp Nearby until you leave the campfire's range. Only right
+  clicks are taken (`SetPassThroughButtons`, set out of combat), and it takes the mouse only while
+  Ctrl is down, so left clicks and camera drags still reach the world.
+- Low Health offers healthstones then potions, best first, from the core's lists
+  (`ns.HEALTHSTONES`, `ns.HEALING_POTIONS`, in `Shared/Game/Consumables.lua`), which the Macros
+  module's NF Health reads too, so either works with the other off.
+- Low Health never compares the health: a step curve turns the health percent into 1 below the
+  threshold and 0 above it, and the engine applies that as the frame's alpha itself, so it works in
+  combat even where health is secret to addons. The curve is flat on both sides of the threshold,
+  so it gives the same answer whether it snaps to the point before or the nearest point.
+- The Low Health sound and glow need the health itself. Where the client hands it over readable the
+  sound plays once per dip below the threshold and the glow runs only while low; a secret read skips
+  the sound and leaves the glow running under the alpha. The Font Size is the warning's; the count
+  keeps its size and follows the font and outline.
+
+## Checking
+
+- `lua Tools/regression/test-buff-reminders.lua`: which reminders show, the item menu, the card.
+- `lua Tools/regression/test-campfire-simple.lua`: both Campfire looks, the reader, Camp Nearby,
+  the Sleeping Bag beside Round or moved in the HUD Editor, and the cards' previews.
+- `lua Tools/regression/test-icon-look.lua`: Low Health's text.
+- `lua Tools/regression/test-robin-final.lua`: the Round campfire.
+- `lua Tools/regression/test-combat-perf.lua`: the buff reminders' cost in a raid.

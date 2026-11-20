@@ -1,0 +1,10 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!-- InspectPanel.xml: the Naowh Inspect Panel's files, in load order. -->
+    <Script file="InspectPanel.lua"/>
+    <Script file="Slots.lua"/>
+    <Script file="TheirBiS.lua"/>
+    <Script file="Card.lua"/>
+    <Script file="Details.lua"/>
+    <Script file="History.lua"/>
+    <Script file="UI\SettingsPage.lua"/>
+</Ui>

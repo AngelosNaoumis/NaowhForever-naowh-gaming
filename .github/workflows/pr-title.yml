@@ -1,0 +1,50 @@
+name: checks
+
+# A squash merge makes the title the commit on main, and the release takes the changelog
+# from the description. Its own workflow so editing the description or the labels re-runs
+# only this.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, labeled, unlabeled]
+
+permissions: {}
+
+jobs:
+
+  pr-rules:
+    name: pr-rules
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check the PR against its base branch
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          NO_CHANGELOG: ${{ contains(github.event.pull_request.labels.*.name, 'no changelog') }}
+          RELEASE: ${{ contains(github.event.pull_request.labels.*.name, 'release') }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: bash Tools/hooks/check-pr.sh "origin/$BASE_REF"
+
+  title:
+    name: title
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check the title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          types='feat|fix|perf|refactor|docs|test|ci|build|chore|revert'
+          if [[ "$TITLE" =~ ^($types)(\([a-z0-9-]+\))?!?:\ [^[:space:]] ]]; then
+            echo "OK: $TITLE"
+          else
+            echo "::error::PR title must look like 'type: summary' or 'type(scope): summary'."
+            echo "Types: ${types//|/, }. Example: 'fix(bag-space): keep the row hidden in combat'."
+            echo "Got: $TITLE"
+            exit 1
+          fi

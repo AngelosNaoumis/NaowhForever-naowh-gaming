@@ -1,0 +1,74 @@
+-- Run with Lua 5.1 from the repository root: Blessings Auto-Assign. One blessing per paladin per
+-- class, never the same blessing twice in a class, nothing a paladin has not learned, the most
+-- wanted blessings first, one aura each, and a paladin who knows little is served before one who
+-- knows everything.
+local checks = 0
+local function check(label, value) assert(value, label); checks = checks + 1 end
+
+local f = assert(io.open("NaowhForever_Combat/Blessings/AutoAssign.lua", "rb"))
+local source = f:read("*a"):gsub("\r\n", "\n")
+f:close()
+local first = assert(source:find("local WANTED = {", 1, true))
+local last = assert(source:find("local function ApplyPlans(plans)", first, true))
+local chunk = source:sub(first, last - 1) .. "return AutoPlans"
+
+local CLASSES = { "WARRIOR", "PALADIN", "HUNTER", "ROGUE", "PRIEST", "SHAMAN", "MAGE", "WARLOCK", "DRUID" }
+local mine = {}
+local others = {}
+local env = {
+    CLASSES = CLASSES,
+    BLESSINGS = { { key = "might" }, { key = "wisdom" }, { key = "kings" } },
+    AURAS = { { key = "devotion" }, { key = "retribution" }, { key = "concentration" } },
+    IsPaladin = function() return true end,
+    Learned = function(entry) return mine[entry.key] end,
+    MyName = function() return "Glyadin Skywolf" end,
+}
+env.others = others
+local fn = assert(loadstring(chunk))
+setfenv(fn, setmetatable(env, { __index = _G }))
+local AutoPlans = fn()
+
+local function Set(...)
+    local t = {}
+    for _, k in ipairs({ ... }) do t[k] = true end
+    return t
+end
+
+-- You know everything; another paladin knows only Might and Devotion.
+mine = Set("might", "wisdom", "kings", "devotion", "retribution", "concentration")
+others["Bram Hollow"] = { known = Set("might", "devotion") }
+local plans = AutoPlans()
+local me, bram = plans["Glyadin Skywolf"], plans["Bram Hollow"]
+check("the paladin who knows only Might gives warriors Might", bram.classes.WARRIOR == "might")
+check("you then give warriors the next one, Kings", me.classes.WARRIOR == "kings")
+check("the scarce paladin gets the only aura they know", bram.aura == "devotion")
+check("you get the next aura", me.aura == "retribution")
+
+for _, class in ipairs(CLASSES) do
+    local a, b = me.classes[class], bram.classes[class]
+    check(class .. ": never the same blessing twice", not (a and b and a == b))
+    check(class .. ": nothing the other paladin has not learned", b == nil or b == "might")
+end
+
+check("a lone paladin gives mages Wisdom, in a party or a raid", plans["Glyadin Skywolf"].classes.MAGE == "wisdom")
+
+-- Two paladins who both know every blessing: the one who knows less picks first.
+others["Bram Hollow"] = { known = Set("might", "wisdom", "kings", "devotion") }
+plans = AutoPlans()
+check("two paladins: the one who knows less picks first", plans["Bram Hollow"].classes.PALADIN == "wisdom"
+    and plans["Glyadin Skywolf"].classes.PALADIN == "kings")
+check("two paladins: warriors get Might and Kings", plans["Bram Hollow"].classes.WARRIOR == "might"
+    and plans["Glyadin Skywolf"].classes.WARRIOR == "kings")
+
+-- A paladin running PallyPower keeps their own plan, and you are planned around it.
+others["Bram Hollow"] = nil
+others["Lux Aeterna"] = { known = Set("might", "wisdom", "kings", "devotion"), pallyPower = true,
+    classes = { WARRIOR = "might", PRIEST = "wisdom" }, aura = "devotion" }
+plans = AutoPlans()
+check("a PallyPower paladin is not planned", plans["Lux Aeterna"] == nil)
+check("what they give a class is not given again", plans["Glyadin Skywolf"].classes.WARRIOR == "kings"
+    and plans["Glyadin Skywolf"].classes.PRIEST == "kings")
+check("a class they leave out is still planned", plans["Glyadin Skywolf"].classes.MAGE == "wisdom")
+check("nor is their aura", plans["Glyadin Skywolf"].aura == "retribution")
+
+print(("test-blessing-autoassign: %d checks passed"):format(checks))

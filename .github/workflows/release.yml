@@ -1,0 +1,337 @@
+name: Release
+
+# A push to main builds a package. A tag publishes a release. Run workflow makes the release
+# commit and tag (Tools/release/release.py) and pushes them with the release deploy key, which is on
+# Protect main's bypass list; that tag push then runs the release.
+# Every day the same runs by itself, after the daily reset: with what main has for players, or on
+# a quiet day with the day's Daily Word as its one line, a release that posts nothing to Discord
+# or the website. Every night a beta: main's version stamped on a commit of its own, tagged
+# "<next>-beta.<n>" but never pushed to main. The packager publishes a beta tag on
+# CurseForge's beta channel; betas post nothing to Discord.
+# Every evening between those, a price release: the newest release again, tagged
+# "<release>-prices.<n>" on top of the release, not main, with the auction prices every tagged release builds just before
+# packaging. It adds no changelog line, so it posts nothing to Discord or the website.
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "*"
+  # The daily, nightly and price crons are paused: CurseForge warned the account over frequent
+  # uploads with minor changes. Releases go out by Run workflow only.
+  workflow_dispatch:
+    inputs:
+      beta:
+        description: "Tag tonight's beta now instead of a release (the bump and version are ignored)"
+        type: boolean
+        default: false
+      prices:
+        description: "Release the newest release again with this hour's auction prices (the rest is ignored)"
+        type: boolean
+        default: false
+      bump:
+        description: "Bump the newest tag: patch (1.0.1 -> 1.0.2), minor (-> 1.1.0) or major (-> 2.0.0)"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      version:
+        description: "Exact version instead, e.g. 1.0.2 (optional; overrides the bump)"
+        required: false
+        type: string
+
+permissions: {}
+
+# Never cancel a release halfway through publishing. One queue per tag, so a push to main
+# straight after a release can never replace the tag run still waiting to publish.
+concurrency:
+  group: release-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+
+  prepare:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && !inputs.beta
+        && !inputs.prices)
+      || (github.event_name == 'schedule' && github.event.schedule == '30 15 * * *')
+
+    runs-on: ubuntu-24.04
+
+    # Reads the merged PRs' changelog lines; the push itself uses RELEASE_DEPLOY_KEY.
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Release commit and tag
+        env:
+          BUMP: ${{ inputs.bump || 'patch' }}
+          # The UTC day before the Daily Word's #1 (NaowhForever_QoL/Travel/DailyWord.lua's FIRST_DAY).
+          DAILY_WORD_DAY_ZERO: 20740
+          VERSION: ${{ inputs.version }}
+          DAILY: ${{ github.event_name == 'schedule' }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_DEPLOY_KEY: ${{ secrets.RELEASE_DEPLOY_KEY }}
+        run: |
+          # A quiet day: nothing for players since the last release, so the day's Daily Word is
+          # the release's one line.
+          if [ "$DAILY" = "true" ] && ! python3 Tools/release/release.py pending | tail -n +2 | grep -q .; then
+            number=$(( $(date -u +%s) / 86400 - DAILY_WORD_DAY_ZERO ))
+            printf 'Changed: Daily Word #%d is out (QoL > Travel, or /nf word).\n' "$number" \
+              | python3 Tools/release/release.py add-unreleased
+          fi
+          args=(prepare --bump "$BUMP" --no-beta)
+          if [ -n "$VERSION" ]; then args+=(--version "$VERSION"); fi
+          version=$(python3 Tools/release/release.py "${args[@]}")
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Nothing to commit when main already has the release commit (a version bumped by
+          # hand but not tagged yet).
+          if ! git diff --quiet; then
+            git commit -q -am "chore(release): $version"
+          fi
+          git tag -a "$version" -m "$version"
+          # The tag stays on the release commit; main goes on with an empty "## Unreleased".
+          python3 Tools/release/release.py start-next
+          if ! git diff --quiet; then
+            git commit -q -am "chore: start the next changelog"
+          fi
+          # GITHUB_TOKEN can't bypass Protect main, and its pushes don't start the tag's run.
+          key="$RUNNER_TEMP/release_deploy_key"
+          hosts="$RUNNER_TEMP/known_hosts"
+          (umask 077 && printf '%s\n' "$RELEASE_DEPLOY_KEY" > "$key")
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$hosts"
+          GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o UserKnownHostsFile=$hosts" \
+            git push --atomic "git@github.com:${GITHUB_REPOSITORY}.git" HEAD:main "refs/tags/$version"
+          rm -f "$key"
+
+  beta:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.beta
+        && !inputs.prices)
+      || (github.event_name == 'schedule' && github.event.schedule == '0 22 * * *')
+
+    runs-on: ubuntu-24.04
+
+    # The push itself uses RELEASE_DEPLOY_KEY: a GITHUB_TOKEN tag push starts no release run.
+    permissions:
+      contents: read
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Beta commit and tag
+        env:
+          RELEASE_DEPLOY_KEY: ${{ secrets.RELEASE_DEPLOY_KEY }}
+        run: |
+          version=$(python3 Tools/release/release.py beta)
+          if [ -z "$version" ]; then
+            echo "Nothing new on main since the last release or beta: no beta tonight."
+            exit 0
+          fi
+          python3 Tools/release/release.py stamp "$version"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -q -am "chore(release): $version"
+          git tag -a "$version" -m "$version"
+          key="$RUNNER_TEMP/release_deploy_key"
+          hosts="$RUNNER_TEMP/known_hosts"
+          (umask 077 && printf '%s\n' "$RELEASE_DEPLOY_KEY" > "$key")
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$hosts"
+          GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o UserKnownHostsFile=$hosts" \
+            git push "git@github.com:${GITHUB_REPOSITORY}.git" "refs/tags/$version"
+          rm -f "$key"
+          echo "Tagged $version."
+
+  prices:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.prices)
+      || (github.event_name == 'schedule' && github.event.schedule == '30 20 * * *')
+
+    runs-on: ubuntu-24.04
+
+    # The push itself uses RELEASE_DEPLOY_KEY: a GITHUB_TOKEN tag push starts no release run.
+    permissions:
+      contents: read
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Price tag
+        env:
+          RELEASE_DEPLOY_KEY: ${{ secrets.RELEASE_DEPLOY_KEY }}
+          BLIZZARD_CLIENT_ID: ${{ secrets.BLIZZARD_CLIENT_ID }}
+          BLIZZARD_CLIENT_SECRET: ${{ secrets.BLIZZARD_CLIENT_SECRET }}
+        run: |
+          version=$(python3 Tools/release/release.py prices)
+          if [ -z "$version" ]; then
+            echo "A beta is newer than the newest release: no price release, so the beta channel keeps it."
+            exit 0
+          fi
+          release=${version%-prices.*}
+          if ! git cat-file -e "$release:Tools/build/auction_feed.py" 2>/dev/null; then
+            echo "$release has no auction prices to refresh: no price release."
+            exit 0
+          fi
+          # The release's own commit, so nothing merged since it ships early.
+          git checkout -q "$release"
+          # Only a tag Blizzard has prices for: the tag's run builds them again.
+          if ! python3 Tools/build/auction_feed.py --out "$RUNNER_TEMP/Prices.lua"; then
+            echo "::warning::No auction prices from Blizzard: no price release."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -q --allow-empty -m "chore(release): $version"
+          git tag -a "$version" -m "$version"
+          key="$RUNNER_TEMP/release_deploy_key"
+          hosts="$RUNNER_TEMP/known_hosts"
+          (umask 077 && printf '%s\n' "$RELEASE_DEPLOY_KEY" > "$key")
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$hosts"
+          GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o UserKnownHostsFile=$hosts" \
+            git push "git@github.com:${GITHUB_REPOSITORY}.git" "refs/tags/$version"
+          rm -f "$key"
+          echo "Tagged $version."
+
+  release:
+    # Run workflow's tag push starts its own run, which publishes the release.
+    if: github.event_name == 'push'
+
+    runs-on: ubuntu-24.04
+
+    # Uploads the GitHub release (GITHUB_OAUTH below).
+    permissions:
+      contents: write
+
+    env:
+      CF_API_KEY: ${{ secrets.CF_API_KEY }}
+      WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
+      # A price release goes to CurseForge and Wago only. On GitHub it would be the latest release, which the
+      # desktop app and naowh.gg install and show as the version, and the app's version compare reads
+      # "1.2.18-prices.1" as older than 1.2.17. Without a token the packager skips GitHub.
+      GITHUB_OAUTH: ${{ !contains(github.ref_name, '-prices.') && secrets.GITHUB_TOKEN || '' }}
+      # The release being published; empty for a plain push to main.
+      TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The whole CHANGELOG.md is past GitHub's 125,000-character limit for release notes, so
+      # the packager is given this release's player notes and the commits since the last tag
+      # (.pkgmeta's manual-changelog, left out of the package; CHANGELOG.md still ships).
+      - name: Release notes
+        env:
+          # A beta's notes read the merged pull requests' changelog lines.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if [ -n "$TAG" ]; then
+            python3 Tools/release/release.py notes "$TAG" > RELEASE_NOTES.md
+          else
+            printf 'Development build of %s.\n' "$GITHUB_SHA" > RELEASE_NOTES.md
+          fi
+
+      # Built here over the committed placeholder (NaowhForever_SearchIndex/README.md).
+      - name: Build the search index
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q lua5.1
+          lua5.1 Tools/build/search_index.lua
+
+      # Every release carries the auction prices of its hour (NaowhForever_AuctionData/README.md),
+      # built over the committed placeholder. A price release has nothing else to ship, so it stops
+      # without them; any other release keeps the newest release's prices, with a warning.
+      - name: Build the auction prices
+        if: env.TAG != ''
+        env:
+          BLIZZARD_CLIENT_ID: ${{ secrets.BLIZZARD_CLIENT_ID }}
+          BLIZZARD_CLIENT_SECRET: ${{ secrets.BLIZZARD_CLIENT_SECRET }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if python3 Tools/build/auction_feed.py; then exit 0; fi
+          case "$TAG" in *-prices.*) exit 1 ;; esac
+          last="$RUNNER_TEMP/last"
+          if gh release download --pattern '*.zip' --dir "$last" \
+            && unzip -p "$last"/*.zip NaowhForever_AuctionData/Prices.lua > "$last/Prices.lua"; then
+            mv "$last/Prices.lua" NaowhForever_AuctionData/Prices.lua
+            echo "::warning::No new auction prices: $TAG ships the newest release's."
+          else
+            git checkout -- NaowhForever_AuctionData/Prices.lua
+            echo "::warning::No auction prices this time: $TAG ships the placeholder."
+          fi
+
+      - name: Release
+        uses: BigWigsMods/packager@01e8631a69c69d7654c788d152630d5fed9e3812 # v2.7.0
+        with:
+          # CurseForge and Wago projects, only for a tagged release so main's dev builds stay off both.
+          # -n names the zip and label after the version alone, without the "-forever" the
+          # packager adds when Forever is the only game in the TOCs.
+          args: ${{ env.TAG != '' && '-p 1721187 -a v63QznGb -n {package-name}-{project-version}:{project-version}' || '-n {package-name}-{project-version}:{project-version}' }}
+
+      # A quiet day's release, only the day's Daily Word, posts nothing to Discord or the website;
+      # nor does a release of the daily watch's data alone. Its lines were all on main before the
+      # release commit, which adds a merged pull request's.
+      - name: Daily Word or data only
+        id: kind
+        if: env.TAG != ''
+        run: |
+          lines=$(awk -v heading="## $TAG" '$0 == heading { on = 1; next } /^## / { on = 0 } on' CHANGELOG.md \
+            | grep -v -e '^[[:space:]]*$' -e '^### ' || true)
+          if [ "$(printf '%s\n' "$lines" | wc -l)" -eq 1 ] && printf '%s' "$lines" | grep -q '^- Daily Word #'; then
+            echo "quiet=true" >> "$GITHUB_OUTPUT"
+          elif ! git diff "$TAG^" "$TAG" -- CHANGELOG.md | grep -q '^+- '; then
+            echo "quiet=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post changelog to Discord
+        if: env.TAG != '' && !contains(env.TAG, '-beta.') && steps.kind.outputs.quiet != 'true'
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_CHANGELOG_WEBHOOK }}
+        run: |
+          # One message per line, made before any is sent; notes past an embed's 4096
+          # characters come as "(1/2)", "(2/2)", split at a heading. A second apart, in order.
+          python3 Tools/release/release.py discord "$TAG" > discord.jsonl
+          first=1
+          while IFS= read -r payload; do
+            [ -n "$first" ] || sleep 1
+            first=
+            printf '%s' "$payload" | curl -fsS -H "Content-Type: application/json" -d @- "$DISCORD_WEBHOOK"
+          done < discord.jsonl
+
+      - name: Update the website
+        if: env.TAG != '' && !contains(env.TAG, '-beta.') && steps.kind.outputs.quiet != 'true'
+        # Without the token, or if it fails, the site picks the notes up on its next scheduled rebuild.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.NAOWH_SITE_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "NAOWH_SITE_TOKEN is not set: the website updates on its next scheduled rebuild."
+            exit 0
+          fi
+          gh api repos/naowh-gaming/naowh.gg/dispatches -f event_type=addon-release -f "client_payload[tag]=$TAG"

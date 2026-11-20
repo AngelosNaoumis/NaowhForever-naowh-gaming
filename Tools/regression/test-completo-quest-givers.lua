@@ -1,0 +1,167 @@
+-- Run with Lua 5.1 from the repository root: a quest the Quest List's data says is not yours (its
+-- race or class mask) becomes yours, for good, once a quest giver offers it to you; a player
+-- sharing a quest, a giver outside the Quest List's zones, or a quest the data lacks, teaches nothing,
+-- and one giver's quests are learned in one pass. A closed quest a giver offers is open, while one opened
+-- past a requirement still closes. A quest its giver does not offer is held back until you level up, and
+-- one not offered at two levels until the giver offers it.
+local function Read(path)
+    local f = assert(io.open(path, "rb"))
+    local s = f:read("*a"):gsub("\r\n", "\n"); f:close()
+    return s
+end
+
+local checks = 0
+local function Check(ok, label) assert(ok, label); checks = checks + 1 end
+
+local ALLIANCE_NO_HUMAN = 4294967372
+local SHAMAN = 64
+
+local account = {}
+local offers, player, logged = {}, false, {}
+local bestMap, builds, refreshes, level = 1429, 0, 0, 5
+local handlers = {}
+
+local function Frame()
+    local frame = { events = {} }
+    function frame:RegisterEvent(event) self.events[event] = true end
+    function frame:UnregisterAllEvents() self.events = {} end
+    function frame:SetScript(_, fn) handlers[#handlers + 1] = { frame = self, fn = fn } end
+    return frame
+end
+
+local function Fire(event, ...)
+    for _, h in ipairs(handlers) do
+        if h.frame.events[event] then h.fn(h.frame, event, ...) end
+    end
+end
+
+local function Quest(name, side, races, classes)
+    return { name, 5, 1, side, races or 0, classes or 0, 1429, 40.0, 50.0, "Giver" }
+end
+
+local function Load()
+    handlers = {}
+    local settings = { Get = function(key) return key == "enabled" end, Set = function() end }
+    local ns = {
+        AccountSettings = function() return account end,
+        Apply = function() end,
+        Completo = { Holidays = { Read = function() end, On = function() return false end }, CharKey = function() return "Me-Realm" end, Settings = settings },
+        Shared = { Places = dofile("Tools/regression/shared_places.lua") },
+        CompletoQuestData = {
+            Zones = { { map = 1429, name = "Elwynn Forest", quests = { 1, 2, 3, 4, 5, 6, 7, 8, 9 } } },
+            Quests = { [1] = Quest("Delicate Instruments", 1, ALLIANCE_NO_HUMAN),
+                [2] = Quest("Call of Earth", 1, 0, SHAMAN), [3] = Quest("Kobold Camp Cleanup", 1),
+                [4] = Quest("Horde Only", 2), [5] = Quest("The Lost Ingots", 1), [6] = Quest("Held Back", 1),
+                [7] = Quest("Lead-in", 1), [8] = Quest("Another Way", 1), [9] = Quest("Not Offered", 1) },
+            Repeatable = {}, Dungeon = {}, Requires = { [6] = { 7 } }, Chains = {}, Events = {}, Holidays = {}, FaireSpots = {}, Exclusive = { { 3, 5 }, { 6, 8 } },
+        },
+    }
+    function ns.OnApply(fn) local was = ns.Apply ns.Apply = function(...) was(...) fn(...) end end
+    local env = setmetatable({
+        _G = { NaowhForever = ns },
+        wipe = function(t) for k in pairs(t) do t[k] = nil end return t end,
+        hooksecurefunc = function() end,
+        CreateFrame = Frame,
+        issecretvalue = function() return false end,
+        UnitFactionGroup = function() return "Alliance" end,
+        UnitRace = function()
+            builds = builds + 1
+            return "Human", "Human", 1
+        end,
+        UnitClass = function() return "Warrior", "WARRIOR", 1 end,
+        UnitLevel = function() return level end,
+        UnitExists = function() return true end,
+        UnitIsPlayer = function() return player end,
+        UnitGUID = function() return "Creature-0-1" end,
+        UnitName = function() return "Giver" end,
+        C_GossipInfo = { GetAvailableQuests = function() return offers end },
+        C_Minimap = { IsFilteredOut = function() return true end },
+        Enum = { MinimapTrackingFilter = { TrivialQuests = 1 } },
+        C_Map = { GetBestMapForUnit = function() return bestMap end, GetMapInfo = function() return nil end },
+        GetProfessions = function() end,
+        C_SpellBook = { IsSpellKnown = function() return false end },
+        C_QuestLog = {
+            GetAllCompletedQuestIDs = function()
+                refreshes = refreshes + 1
+                return {}
+            end,
+            GetLogIndexForQuestID = function() return nil end,
+            GetNumQuestLogEntries = function() return #logged end,
+            GetQuestIDForLogIndex = function(i) return logged[i] end,
+        },
+    }, { __index = _G })
+    for _, path in ipairs({ "NaowhForever_Discovery/QuestList/Quests.lua", "NaowhForever_Discovery/QuestList/Givers.lua" }) do
+        local chunk = assert(loadstring(Read(path), path))
+        setfenv(chunk, env)
+        chunk()
+    end
+    Fire("PLAYER_LOGIN")
+    local Q = ns.Completo.Quests
+    Q.Refresh()
+    return Q
+end
+
+local Q = Load()
+Check(not Q.Mine(1) and not Q.Mine(2) and Q.Mine(3), "the data's masks leave a Human warrior out of two quests")
+
+offers = { { questID = 1 }, { questID = 2 }, { questID = 3 }, { questID = 999 } }
+player = true
+Fire("GOSSIP_SHOW")
+Check(not Q.Mine(1) and not Q.Mine(2), "a player sharing a quest teaches nothing")
+
+player, bestMap = false, nil
+local before = refreshes
+Fire("GOSSIP_SHOW")
+Check(refreshes == before and not Q.Mine(1), "a giver outside the Quest List's zones reads nothing and teaches nothing")
+
+bestMap, before = 1429, builds
+Fire("GOSSIP_SHOW")
+Check(Q.Mine(1) and Q.Mine(2), "a quest a giver offers you is yours whatever its mask says")
+Check(builds == before + 1, "the quests one giver offers are learned in one pass")
+local pinned = false
+for _, id in ipairs(Q.Givers(1429, true, false)[1].quests) do pinned = pinned or id == 1 end
+Check(Q.State(1) == "open" and pinned, "it is open and its giver gets a ! for it")
+Q.SetHidden(1, true)
+local hiddenPinned = false
+for _, giver in ipairs(Q.Givers(1429, true, false)) do
+    for _, id in ipairs(giver.quests) do hiddenPinned = hiddenPinned or id == 1 end
+end
+Check(not hiddenPinned and account.completoHidden["Me-Realm"][1] and Q.HiddenCount() == 1,
+    "a quest hidden from the map gets no !, kept per character")
+Q.ShowHidden()
+Check(Q.HiddenCount() == 0 and not Q.Hidden(1), "Show All puts every hidden quest back")
+local learned = account.completoMine["Me-Realm"]
+Check(learned[1] and learned[2] and not learned[3] and not learned[999], "only quests the data has and left out are kept")
+
+Q = Load()
+Check(Q.Mine(1) and Q.Mine(2) and not Q.Mine(4), "kept per character, after a reload too")
+
+logged = { 3 }
+Q.Refresh()
+Check(Q.State(5) == "closed", "the other of an exclusive pair is closed while one is in your log")
+offers = { { questID = 5 } }
+Fire("GOSSIP_SHOW")
+Check(Q.State(5) == "open", "until its giver offers it")
+
+offers = { { questID = 6 } }
+Fire("GOSSIP_SHOW")
+Check(Q.State(6) == "open", "a quest its giver offers before its requirement is done is open")
+logged = { 3, 8 }
+Q.Refresh()
+Check(Q.State(6) == "closed", "and still closes once the other of its pair is in your log")
+local opened, reopened = account.completoOpened["Me-Realm"], account.completoReopened["Me-Realm"]
+Check(reopened[5] and not opened[5] and opened[6] and not reopened[6], "each kind of offer is kept apart")
+
+offers = {}
+Fire("GOSSIP_SHOW")
+Check(Q.State(9) == "held", "a quest its giver does not offer is held back")
+level = 6
+Check(Q.State(9) == "open", "until you level up")
+Fire("GOSSIP_SHOW")
+level = 7
+Check(Q.State(9) == "held", "one not offered at two levels stays held past the next level up")
+offers = { { questID = 9 } }
+Fire("GOSSIP_SHOW")
+Check(Q.State(9) == "open" and account.completoNotOffered["Me-Realm"][9] == nil, "until its giver offers it")
+
+print(("test-completo-quest-givers: %d checks passed"):format(checks))

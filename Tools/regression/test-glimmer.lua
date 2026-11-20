@@ -1,0 +1,976 @@
+-- Offline checks for Glimmer: reading the soft target, skill-up colors, the game settings saved and put
+-- back, combat, and the nameplate it opens, against stubs of the game's API. Run from the repo root:
+-- lua Tools/regression/test-glimmer.lua
+local checks = 0
+local function check(label, ok) assert(ok, label); checks = checks + 1 end
+
+local FILES = dofile("Tools/regression/toc_files.lua")("^NaowhForever_QoL/Glimmer/.*%.lua$")
+table.insert(FILES, 1, "Core/Features.lua")
+table.insert(FILES, 2, "Shared/UI/MinimapPins.lua")
+
+local OPEN_MAP, _, STITCH = dofile("Tools/regression/shared_openmap.lua")
+local SHARED = { OpenMap = OPEN_MAP }
+dofile("Tools/regression/load_files.lua")({ "Shared/Style.lua", "Shared/Data/SameMaps.lua", "Shared/Game/Places.lua" }, { _G = { NaowhForever = {
+    L = dofile("Tools/regression/locale_stub.lua").L, Upper = string.upper, Lower = string.lower, Shared = SHARED } } })
+
+local COPPER, TIN, CHEST, BOBBER = 1731, 1732, 2843, 35591
+local function GUID(id) return "GameObject-0-1-2-3-" .. id .. "-0000ABCDEF" end
+
+local function Widget(log)
+    local w = { shown = true, events = {}, points = 0 }
+    setmetatable(w, { __index = function(_, k)
+        if k:match("^%u") then return function() end end
+    end })
+    function w:RegisterEvent(e) self.events[e] = true end
+    function w:UnregisterEvent(e) self.events[e] = nil end
+    function w:UnregisterAllEvents() self.events = {} end
+    function w:SetScript(kind, fn) self[kind] = fn end
+    function w:Show() self.shown = true end
+    function w:Hide() self.shown = false end
+    function w:IsShown() return self.shown end
+    function w:SetParent(p) self.parent = p end
+    function w:SetAlpha(a) self.alpha = a end
+    function w:GetFrameLevel() return 5 end
+    function w:SetText(t) self.text = t end
+    function w:SetTextColor(r, g, b) self.textColor = { r, g, b } end
+    function w:CreateTexture() return Widget(log) end
+    function w:GetTexture() return self.texture end
+    function w:SetTexture(t) self.texture = t end
+    function w:SetPoint(...) self.point = { ... } end
+    function w:SetVertexColor(r, g, b) self.color = { r, g, b } end
+    function w:GetWidth() return 140 end
+    function w:GetEffectiveScale() return 1 end
+    function w:SetScale(s) self.scale = s end
+    function w:SetIgnoreParentScale(on) self.ignoreScale = on end
+    function w:CreateMaskTexture() return Widget(log) end
+    function w:AddMaskTexture(m) self.mask = m end
+    function w:RemoveMaskTexture(m) if self.mask == m then self.mask = nil end end
+    function w:GetHeight() return 140 end
+    log.frames[#log.frames + 1] = w
+    return w
+end
+
+local function Plate(log)
+    local base = Widget(log)
+    base.UnitFrame = { SoftTargetFrame = Widget(log) }
+    return base
+end
+
+local function Session(settings, opts)
+    opts = opts or {}
+    local log = { frames = {}, writes = {}, timers = {}, confirms = {}, reloads = {}, printed = {} }
+    local cvars = {
+        SoftTargetInteract = "1", SoftTargetInteractOnlyInRange = "1", SoftTargetInteractRange = "10",
+        SoftTargetInteractArc = "1", SoftTargetNameplateInteract = "0", SoftTargetIconGameObject = "0",
+        outlineModeShowLootEffectWhenDisabled = "0", graphicsOutlineMode = "2", OutlineEngineMode = "2",
+        raidGraphicsOutlineMode = "2", RAIDOutlineEngineMode = "2",
+    }
+    log.cvars = cvars
+    local game = { combat = false, instance = false, guid = nil, object = true, near = false, related = false,
+        tooltip = nil, plate = nil, mining = 70, miningBonus = 0, herbalism = 0, loaded = opts.loaded or {}, px = 0.5, py = 0.5,
+        pins = {}, at = {} }
+    log.game = game
+    local account = {}
+    log.account = account
+    local hooks = {}
+    local S = {}
+    local ns = {
+        L = dofile("Tools/regression/locale_stub.lua").L, Shared = SHARED, THEME = { muted = {} },
+        UI = { ModuleSettings = function(_, defaults)
+            function S.Get(k) local v = settings[k]; if v == nil then return defaults[k] end; return v end
+            function S.Set(k, v) settings[k] = v end
+            function S.Raw(k) return settings[k] end
+            return S
+        end },
+    }
+    SHARED.Parts = { HudText = function(fs) return fs end }
+    SHARED.MapPins = {}
+    SHARED.Ago = function() return "today" end
+    SHARED.ScalePin = function() end
+    function ns.PlaceWaypoint(title, map, x, y) log.waypoint = { title, map, x, y } end
+    ns.ToggleWaypoint = ns.PlaceWaypoint
+    function ns.Apply() end
+    function ns.OnApply(fn) local was = ns.Apply ns.Apply = function(...) was(...) fn(...) end end
+    function ns.AccountSettings() return account end
+    function ns.Font() return Widget(log) end
+    function ns.Print(text) log.printed[#log.printed + 1] = text end
+    function ns.Confirm(text, onYes) log.confirms[#log.confirms + 1] = { text = text, yes = onYes } end
+    function ns.ConfirmReload(text) log.reloads[#log.reloads + 1] = text end
+
+    local env = setmetatable({
+        _G = { NaowhForever = ns },
+        CreateFrame = function() return Widget(log) end,
+        UIParent = Widget(log),
+        hooksecurefunc = function(t, name, fn)
+            local orig = t[name]
+            t[name] = function(...) local a, b, c = orig(...); fn(...); return a, b, c end
+            hooks[#hooks + 1] = name
+        end,
+        C_CVar = {
+            GetCVar = function(name) return cvars[name] end,
+            GetCVarBool = function(name) return cvars[name] == "1" end,
+            SetCVar = function(name, value)
+                assert(not game.combat, "a game setting was changed in combat: " .. name)
+                cvars[name] = value
+                log.writes[#log.writes + 1] = name
+            end,
+        },
+        C_Timer = { After = function(_, fn) log.timers[#log.timers + 1] = fn end },
+        C_NamePlate = { GetNamePlateForUnit = function() return game.plate end },
+        C_QuestLog = { UnitIsRelatedToActiveQuest = function() return game.related end },
+        C_TooltipInfo = { GetUnit = function() return game.tooltip end },
+        C_AddOns = {
+            IsAddOnLoaded = function(name) return game.loaded[name] and true or false end,
+            GetAddOnInfo = function(name) return name, name end,
+            DisableAddOn = function(name) game.loaded[name] = nil; log.disabled = name end,
+        },
+        C_EncodingUtil = {
+            DecodeBase64 = function(s) return s end,
+            DecompressString = function(s) return s end,
+            DeserializeCBOR = function(s)
+                log.dataLoaded = s
+                return { 1429, { 1731, 500, 520, 1618, 510, 500, 1732, 900, 900 } }
+            end,
+        },
+        Enum = { TooltipDataLineType = { QuestObjective = 8 }, CompressionMethod = { Deflate = 0 } },
+        UnitGUID = function() return game.guid end,
+        UnitIsGameObject = function() return game.guid ~= nil and game.object end,
+        UnitIsInInteractRange = function() return game.near end,
+        UnitIsDead = function() return game.dead or false end,
+        CanLootUnit = function(guid)
+            log.lootAsked = guid
+            return game.loot or false, game.canLoot or false
+        end,
+        UnitIsUnit = function(unit) return unit ~= "nameplate9" end,
+        GetNumLootItems = function() return game.lootSlots and #game.lootSlots or 1 end,
+        GetLootSourceInfo = function(slot)
+            if game.lootSlots then return unpack(game.lootSlots[slot]) end
+            return game.lootFrom or game.guid
+        end,
+        SetUnitCursorTexture = function(texture, _, _, lowPriority)
+            local cursor = game.cursor
+            if game.cursorLow and not lowPriority then cursor = nil end
+            texture.texture = cursor
+            return cursor ~= nil
+        end,
+        GetFileIDFromPath = function() return nil end,
+        GetProfessions = function() return 1, game.herbalism > 0 and 2 or nil end,
+        GetProfessionInfo = function(i)
+            if i == 2 then return "Herbalism", 0, game.herbalism, 300, 0, 0, 182, 0 end
+            return "Mining", 0, game.mining, 300, 0, 0, 186, game.miningBonus
+        end,
+        InCombatLockdown = function() return game.combat end,
+        IsInInstance = function() return game.instance end,
+        GetTime = function() return log.now or 0 end,
+        wipe = function(t) for k in pairs(t) do t[k] = nil end return t end,
+        time = function() return 1000 end,
+        CreateVector2D = function(x, y) return { x = x, y = y, GetXY = function(v) return v.x, v.y end } end,
+        C_Map = {
+            GetBestMapForUnit = function() return 1429 end,
+            GetPlayerMapPosition = function() return { GetXY = function() return game.px, game.py end } end,
+            GetWorldPosFromMapPos = function(_, v)
+                return 0, { GetXY = function() return v.x * 1000, v.y * 1000 end }
+            end,
+            GetMapWorldSize = function() return 1000, 1000 end,
+        },
+        C_Minimap = {
+            GetViewRadius = function() return 100 end,
+            GetNumTrackingTypes = function() return 2 end,
+            GetTrackingInfo = function(i)
+                local spell = i == 1 and 2580 or 2383
+                return { spellID = spell, active = game.tracking == spell }
+            end,
+        },
+        C_Spell = { GetSpellTexture = function(id) return "spell" .. id end },
+        UnitPosition = function() return game.px * 1000, game.py * 1000, 0, 0 end,
+        GetPlayerFacing = function() return 0 end,
+        IsPlayerMoving = function() return false end,
+        Minimap = Widget(log),
+        CreateFromMixins = function(...)
+            local t = {}
+            for _, m in ipairs({ ... }) do for k, v in pairs(m) do t[k] = v end end
+            return t
+        end,
+        MapCanvasDataProviderMixin = {},
+        MapCanvasPinMixin = {},
+        WorldMapFrame = {
+            AddDataProvider = function(_, p)
+                log.provider = p
+                p.GetMap = function() return {
+                    GetMapID = function() return 1429 end,
+                    RemoveAllPinsByTemplate = function() for k in pairs(game.pins) do game.pins[k] = nil end end,
+                    AcquirePin = function(_, _, entry, x, y, mapID)
+                        game.pins[#game.pins + 1] = entry
+                        game.at[entry] = { x, y, mapID }
+                    end,
+                } end
+            end,
+            IsShown = function() return game.mapShown end,
+        },
+    }, { __index = _G })
+    dofile("Tools/regression/load_files.lua")(FILES, env)
+    log.ns, log.env, log.S = ns, env, S
+    function log.Fire(event, ...)
+        for _, f in ipairs(log.frames) do
+            if f.events[event] and rawget(f, "OnEvent") then f.OnEvent(f, event, ...) end
+        end
+    end
+    function log.RunTimers()
+        local timers = log.timers
+        log.timers = {}
+        for _, fn in ipairs(timers) do fn() end
+    end
+    function log.Login()
+        for _, f in ipairs(log.frames) do
+            if f.events.PLAYER_LOGIN and rawget(f, "OnEvent") then f.OnEvent(f, "PLAYER_LOGIN") end
+        end
+    end
+    function log.Set(k, v)
+        S.Set(k, v)
+        log.RunTimers()
+    end
+    return log
+end
+
+local function Registered(log)
+    local n = 0
+    for _, f in ipairs(log.frames) do
+        for event in pairs(f.events) do
+            if event ~= "PLAYER_LOGIN" then n = n + 1 end
+        end
+    end
+    return n
+end
+
+local function Listening(log, event)
+    for _, f in ipairs(log.frames) do
+        if f.events[event] then return true end
+    end
+    return false
+end
+
+local function Lit(log)
+    for _, f in ipairs(log.frames) do
+        if f.glints and f.shown and f.parent == log.game.plate and log.game.plate then return f end
+    end
+end
+
+local function LineText(log)
+    local fx = Lit(log)
+    if not fx then return end
+    for _, f in ipairs(log.frames) do
+        if f.text and f.shown ~= false and f ~= fx then return f.text end
+    end
+end
+
+-- Off by default: nothing changes, nothing listens.
+do
+    local log = Session({})
+    log.Login()
+    check("off by default", log.ns.Glimmer.On() == false)
+    check("off: no game setting written", #log.writes == 0)
+    check("off: no event but the login check", Registered(log) == 0)
+end
+
+-- Quest givers used to be part of Quest Objects: a profile without its own giver settings takes the
+-- quest ones, once, and a profile switched to later gets the same.
+do
+    local settings = { quest = false, questStyle = "ring", questColor = { r = 0.1, g = 0.2, b = 0.3 } }
+    local log = Session(settings)
+    log.ns.Apply()
+    check("quest objects off: quest givers stay off", settings.giver == false)
+    check("and keep the quest effect", settings.giverStyle == "ring")
+    check("and the quest color, as a copy", settings.giverColor ~= settings.questColor
+        and settings.giverColor.r == 0.1 and settings.giverColor.g == 0.2 and settings.giverColor.b == 0.3)
+    log.S.Set("giver", true)
+    log.S.Set("giverStyle", "beam")
+    log.ns.Apply()
+    check("only once: givers turned back on stay on", settings.giver == true and settings.giverStyle == "beam")
+
+    for k in pairs(settings) do settings[k] = nil end
+    settings.quest, settings.giverStyle = true, "glow"
+    log.ns.Apply()
+    check("another profile: givers follow quest objects", settings.giver == true)
+    check("a giver effect already picked is kept", settings.giverStyle == "glow" and settings.giverColor == nil)
+end
+
+-- Every effect draws, in reach and out, through its flash.
+do
+    local e = Session({})
+    local G = e.ns.Glimmer
+    local fx = G.Effects.New(Widget(e))
+    for _, style in ipairs({ "glow", "sparkles", "ring", "beam", "brackets" }) do
+        G.Effects.Set(fx, style, G.Style.TIER_RGB.orange, 1, 1, false, false)
+        G.Effects.Start(fx)
+        for _ = 1, 30 do fx.OnUpdate(fx, 0.05) end
+        G.Effects.Set(fx, style, G.Style.TIER_RGB.orange, 1, 1, true, false)
+        check(style .. ": reaching it flashes", fx.burstAge == 0)
+        for _ = 1, 30 do fx.OnUpdate(fx, 0.05) end
+        check(style .. ": the flash ends and it is bright", fx.burstAge == nil and fx.lock == 1 and fx.appear == 1)
+    end
+end
+
+-- Skill-up colors.
+do
+    local Tier = Session({}).ns.Glimmer.Target.Tier
+    check("below the node's skill is red", Tier(64, 65) == "red")
+    check("at it, orange", Tier(65, 65) == "orange" and Tier(89, 65) == "orange")
+    check("25 over, yellow", Tier(90, 65) == "yellow" and Tier(114, 65) == "yellow")
+    check("50 over, green", Tier(115, 65) == "green" and Tier(164, 65) == "green")
+    check("100 over, grey", Tier(165, 65) == "grey")
+    local s = Session({})
+    s.game.herbalism = 120
+    s.env.GetProfessions = function() return nil, 2 end
+    check("a gap before Herbalism in the professions list still finds its skill",
+        s.ns.Glimmer.Target.Skill("herb") == 120 and s.ns.Glimmer.Target.Skill("ore") == 0)
+end
+
+-- Turned on: the soft target settings are saved, then set.
+local log = Session({ enabled = true })
+log.Login()
+local cv = log.cvars
+check("on: the soft target is kept on", cv.SoftTargetInteract == "3" and cv.SoftTargetInteractOnlyInRange == "0")
+check("on: range and direction from the settings", cv.SoftTargetInteractRange == "15" and cv.SoftTargetInteractArc == "2")
+check("on: the old values are saved", log.account.glimmerSoftCVars.SoftTargetInteract == "1"
+    and log.account.glimmerSoftCVars.SoftTargetInteractRange == "10")
+check("on: objects get their nameplate", cv.SoftTargetIconGameObject == "1"
+    and log.account.glimmerSoftCVars.SoftTargetIconGameObject == "0")
+check("on: the quest sparkle is left alone", cv.graphicsOutlineMode == "2" and log.account.glimmerSparkleCVars == nil)
+check("on: no target, no nameplate opened", cv.SoftTargetNameplateInteract == "0")
+
+-- A copper vein a little way off.
+log.game.guid = GUID(COPPER)
+log.Fire("PLAYER_SOFT_INTERACT_CHANGED", "", "x")
+check("a vein opens the nameplate", cv.SoftTargetNameplateInteract == "1")
+check("nothing lit before the nameplate comes", Lit(log) == nil)
+log.game.plate = Plate(log)
+log.Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+local fx = Lit(log)
+check("lit on the nameplate once it comes", fx ~= nil and fx.style == "sparkles")
+check("out of reach first", fx.ready == false)
+local St = log.ns.Glimmer.Style
+check("70 Mining on Copper is green", fx.r == St.TIER_RGB.green.r and fx.g == St.TIER_RGB.green.g)
+check("and says so under the name", LineText(log) == "Skill-up unlikely")
+
+-- Walking into reach: it waits for the answer to hold, then brightens.
+log.game.near = true
+local Watch
+for _, f in ipairs(log.frames) do if rawget(f, "OnUpdate") and not f.glints and f.shown then Watch = f end end
+log.now = 1
+Watch.OnUpdate(Watch, 0.2)
+check("in reach: not before the answer holds", fx.ready == false)
+log.now = 1.3
+Watch.OnUpdate(Watch, 0.2)
+check("in reach: then bright, with the flash", fx.ready == true and fx.burstAge == 0)
+
+-- Too low for tin.
+log.game.guid, log.game.mining = GUID(TIN), 20
+log.Fire("PLAYER_SOFT_INTERACT_CHANGED", "x", "y")
+fx = Lit(log)
+check("too low: grey and locked", fx and fx.locked == true and fx.r == St.LOCKED_RGB.r)
+check("too low: the skill it needs", LineText(log) == "Requires Mining 65")
+log.Set("hideLocked", true)
+check("too low and hidden: dark", Lit(log) == nil)
+log.Set("hideLocked", false)
+log.game.miningBonus = 50
+log.Fire("PLAYER_SOFT_INTERACT_CHANGED", "x", "y")
+check("a Mining bonus counts toward the skill it needs", Lit(log) and Lit(log).locked == false)
+log.game.miningBonus = 0
+
+-- No Mining at all: grey, like a node the skill is too low for.
+log.game.mining = 0
+log.Fire("PLAYER_SOFT_INTERACT_CHANGED", "x", "y")
+fx = Lit(log)
+check("no Mining: grey and locked", fx and fx.locked == true and fx.r == St.LOCKED_RGB.r)
+check("no Mining: the skill it needs", LineText(log) == "Requires Mining 65")
+log.Set("hideLocked", true)
+check("no Mining and hidden: dark", Lit(log) == nil)
+log.Set("hideLocked", false)
+log.game.mining = 70
+log.Fire("PLAYER_SOFT_INTERACT_CHANGED", "x", "y")
+check("Mining learned: ore lights in its color", Lit(log) and Lit(log).locked == false)
+
+-- A vein missing from the node data, known only by its cursor: grey without Mining too.
+log.game.guid, log.game.cursor, log.game.mining = GUID(999999), "Interface\\Cursor\\Mine", 0
+log.Fire("PLAYER_SOFT_INTERACT_CHANGED", "x", "y")
+fx = Lit(log)
+check("unlisted vein, no Mining: grey and locked", fx and fx.locked == true and fx.r == St.LOCKED_RGB.r)
+log.game.guid, log.game.cursor, log.game.mining = GUID(TIN), nil, 70
+
+-- An NPC: no nameplate opened for it.
+log.game.guid, log.game.object = "Creature-0-1-2-3-4-5", false
+log.Fire("PLAYER_SOFT_INTERACT_CHANGED", "y", "z")
+check("an NPC closes the nameplate", cv.SoftTargetNameplateInteract == "0" and Lit(log) == nil)
+log.game.cursor, log.game.cursorLow = "Cursor Crosshair_QuestTurnIn_64", true
+log.Fire("PLAYER_SOFT_INTERACT_CHANGED", "z", "y")
+check("a quest giver with a quest to hand in lights up, though the game only gives its cursor as low priority",
+    Lit(log) ~= nil)
+log.game.cursor = "Interface\\Cursor\\Quest"
+log.Fire("PLAYER_SOFT_INTERACT_CHANGED", "y", "z")
+check("and one with a quest to pick up", Lit(log) ~= nil)
+for _, cursor in ipairs({ "Cursor Crosshair_Recurring_64", "Cursor Crosshair_ImportantTurnIn_64",
+        "Cursor Crosshair_Wrapper_64" }) do
+    log.game.cursor = cursor
+    log.Fire("PLAYER_SOFT_INTERACT_CHANGED", "z", "y")
+    check("Forever's " .. cursor .. " quest cursor lights the giver too", Lit(log) ~= nil)
+    log.Fire("PLAYER_SOFT_INTERACT_CHANGED", "y", "z")
+end
+log.game.cursor = "Interface\\Cursor\\Quest"
+local unitFrame = { HealthBarsContainer = Widget(log), LevelFrame = Widget(log), PlayerLevelDiffFrame = Widget(log),
+    SoftTargetFrame = Widget(log) }
+log.game.plate.UnitFrame = unitFrame
+log.Fire("PLAYER_SOFT_INTERACT_CHANGED", "z", "y")
+check("a quest giver's plate keeps its bar and level by default",
+    unitFrame.HealthBarsContainer.alpha == nil and unitFrame.LevelFrame.alpha == nil
+    and unitFrame.PlayerLevelDiffFrame.alpha == nil)
+check("and the effect sits at the usual height", Lit(log).point[5] == -40)
+log.Set("giverHideBar", true)
+check("Hide Health Bar and Level: the bar and both level frames go, the name stays",
+    unitFrame.HealthBarsContainer.alpha == 0 and unitFrame.LevelFrame.alpha == 0
+    and unitFrame.PlayerLevelDiffFrame.alpha == 0)
+log.Set("giverOffset", 30)
+check("a quest giver's effect moves by its own height", Lit(log).point[5] == -10)
+log.game.guid, log.game.object, log.game.cursor = GUID(COPPER), true, nil
+log.Fire("PLAYER_SOFT_INTERACT_CHANGED", "y", "z")
+check("the plate gets its bar back when it stops being a quest giver's",
+    unitFrame.HealthBarsContainer.alpha == 1 and unitFrame.LevelFrame.alpha == 1
+    and unitFrame.PlayerLevelDiffFrame.alpha == 1)
+check("and an object's effect keeps the usual height", Lit(log).point[5] == -40)
+log.Set("giverHideBar", false)
+log.Set("giverOffset", 0)
+log.game.guid, log.game.object, log.game.cursor = "Creature-0-1-2-3-4-5", false, "Interface\\Cursor\\Quest"
+log.Fire("PLAYER_SOFT_INTERACT_CHANGED", "z", "y")
+log.Set("giver", false)
+log.Fire("PLAYER_SOFT_INTERACT_CHANGED", "z", "y")
+check("quest givers switched off: dark, and no nameplate opened", cv.SoftTargetNameplateInteract == "0" and Lit(log) == nil)
+log.Set("giver", true)
+log.game.cursor, log.game.cursorLow = nil, nil
+log.Fire("PLAYER_SOFT_INTERACT_CHANGED", "z", "y")
+check("an NPC with no quest stays dark", Lit(log) == nil)
+log.game.object = true
+
+-- Chests and the bobber come from their IDs; a switched off category stays dark.
+log.game.guid = GUID(CHEST)
+log.Fire("PLAYER_SOFT_INTERACT_CHANGED", "z", "a")
+check("a chest lights up", Lit(log) ~= nil and LineText(log) == nil)
+log.Set("chest", false)
+check("chests off: dark", Lit(log) == nil and cv.SoftTargetNameplateInteract == "0")
+log.game.guid = GUID(BOBBER)
+log.Fire("PLAYER_SOFT_INTERACT_CHANGED", "a", "b")
+check("the bobber lights up", Lit(log) ~= nil)
+
+-- A quest object: its objective line from the tooltip.
+log.game.guid, log.game.related = GUID(999999), true
+log.game.tooltip = { lines = { { type = 1, leftText = "Supply Crate" }, { type = 8, leftText = "Supplies: 1/4" } } }
+log.Fire("PLAYER_SOFT_INTERACT_CHANGED", "b", "c")
+check("a quest object shows what is still needed", Lit(log) ~= nil and LineText(log) == "Supplies: 1/4")
+log.Set("giver", false)
+log.Fire("PLAYER_SOFT_INTERACT_CHANGED", "z", "y")
+check("quest objects stay lit with quest givers off", Lit(log) ~= nil)
+log.Set("giver", true)
+log.game.related = false
+
+-- The game does not call it quest related, but its tooltip lists the objective: still a quest object,
+-- in the effect picked for quest objects.
+log.Set("questStyle", "beam")
+log.Fire("PLAYER_SOFT_INTERACT_CHANGED", "c", "d")
+local questFx = Lit(log)
+check("the objective line alone makes it a quest object", questFx ~= nil and LineText(log) == "Supplies: 1/4")
+check("in the effect picked for quest objects", questFx and questFx.style == "beam")
+log.Set("questStyle", "same")
+log.game.tooltip = nil
+
+-- A quest finished and ready to hand in at an object: no objective left, but the game's turn-in cursor.
+log.game.cursor = "Interface\\Cursor\\QuestTurnIn"
+log.Fire("PLAYER_SOFT_INTERACT_CHANGED", "d", "e")
+check("a quest turn-in object lights up from its cursor", Lit(log) ~= nil and LineText(log) == nil)
+log.game.cursor = nil
+log.Fire("PLAYER_SOFT_INTERACT_CHANGED", "e", "f")
+check("without the cursor, objective or quest link it stays dark", Lit(log) == nil)
+
+-- Combat: the nameplate is closed before the lockdown, and settings wait for the fight to end.
+log.game.guid = GUID(COPPER)
+log.Fire("PLAYER_SOFT_INTERACT_CHANGED", "c", "d")
+check("lit before the fight", Lit(log) ~= nil)
+log.Fire("PLAYER_REGEN_DISABLED")
+check("the fight closes the nameplate and rests", cv.SoftTargetNameplateInteract == "0" and Lit(log) == nil)
+log.game.combat = true
+log.Set("range", 10)
+check("a setting in combat waits", cv.SoftTargetInteractRange == "15")
+log.game.combat = false
+log.Fire("PLAYER_REGEN_ENABLED")
+check("and lands after it", cv.SoftTargetInteractRange == "10" and Lit(log) ~= nil)
+
+-- Dungeons.
+log.game.instance = true
+log.Fire("PLAYER_ENTERING_WORLD")
+check("rests in a dungeon", Lit(log) == nil)
+log.game.instance = false
+log.Fire("PLAYER_ENTERING_WORLD")
+
+-- The quest sparkle: saved, set, and put back after a graphics preset.
+log.Set("questSparkle", true)
+check("sparkle on: loot effect on, outlines left alone", cv.outlineModeShowLootEffectWhenDisabled == "1"
+    and cv.graphicsOutlineMode == "2" and cv.raidGraphicsOutlineMode == "2")
+check("sparkle on: the old value is saved", log.account.glimmerSparkleCVars.outlineModeShowLootEffectWhenDisabled == "0"
+    and log.account.glimmerSparkleCVars.graphicsOutlineMode == nil)
+cv.outlineModeShowLootEffectWhenDisabled = "0"
+log.Fire("CVAR_UPDATE", "graphicsQuality", "5")
+check("a preset is undone only after it has finished", cv.outlineModeShowLootEffectWhenDisabled == "0")
+log.RunTimers()
+check("then the sparkle is back", cv.outlineModeShowLootEffectWhenDisabled == "1")
+cv.graphicsOutlineMode = "1"
+log.Fire("CVAR_UPDATE", "graphicsOutlineMode", "1")
+log.RunTimers()
+check("an outline change is the player's own", cv.graphicsOutlineMode == "1")
+cv.graphicsOutlineMode = "2"
+cv.SoftTargetIconGameObject = "0"
+log.Fire("CVAR_UPDATE", "SoftTargetIconGameObject", "0")
+check("the game's Interact Key Icons option turning the object icon off is undone while Glimmer is on",
+    cv.SoftTargetIconGameObject == "1")
+cv.SoftTargetInteract = "1"
+log.Fire("CVAR_UPDATE", "SoftTargetInteract", "1")
+check("Enable Interact Key turned off by the player stays off", cv.SoftTargetInteract == "1")
+cv.SoftTargetInteract = "3"
+log.Set("questSparkle", false)
+check("sparkle off: the old value comes back", cv.outlineModeShowLootEffectWhenDisabled == "0"
+    and log.account.glimmerSparkleCVars == nil)
+
+-- Off again: everything put back, nothing listening.
+log.Set("enabled", false)
+check("off: the soft target settings come back", cv.SoftTargetInteract == "1" and cv.SoftTargetInteractRange == "10"
+    and cv.SoftTargetInteractOnlyInRange == "1" and cv.SoftTargetIconGameObject == "0"
+    and log.account.glimmerSoftCVars == nil)
+check("off: dark", Lit(log) == nil)
+check("off: no event left", Registered(log) == 0)
+
+-- Restore puts back both sets and turns both switches off.
+do
+    local r = Session({ enabled = true, questSparkle = true })
+    r.Login()
+    check("restore: both sets were changed", r.cvars.SoftTargetInteract == "3"
+        and r.cvars.outlineModeShowLootEffectWhenDisabled == "1")
+    r.ns.Glimmer.CVars.RestoreAll()
+    r.RunTimers()
+    check("restore: both sets put back", r.cvars.SoftTargetInteract == "1"
+        and r.cvars.outlineModeShowLootEffectWhenDisabled == "0")
+    check("restore: Glimmer and the sparkle off", r.S.Get("enabled") == false and r.S.Get("questSparkle") == false)
+end
+
+-- Saved before SoftTargetIconGameObject was one of the settings: it is saved too, and put back.
+do
+    local o = Session({ enabled = true })
+    o.account.glimmerSoftCVars = { SoftTargetInteract = "1", SoftTargetInteractRange = "10" }
+    o.Login()
+    check("old save: the new setting is saved on top", o.account.glimmerSoftCVars.SoftTargetIconGameObject == "0"
+        and o.account.glimmerSoftCVars.SoftTargetInteract == "1" and o.cvars.SoftTargetIconGameObject == "1")
+    o.Set("enabled", false)
+    check("old save: and put back", o.cvars.SoftTargetIconGameObject == "0" and o.account.glimmerSoftCVars == nil)
+end
+
+-- The player changes Glimmer's own settings while it is on: Glimmer keeps its value and remembers theirs.
+do
+    local o = Session({ enabled = true })
+    o.cvars.SoftTargetIconGameObject = "1"
+    o.Login()
+    o.cvars.SoftTargetIconGameObject = "0"
+    o.Fire("CVAR_UPDATE", "SoftTargetIconGameObject", "0")
+    check("a player's None while Glimmer is on: the object icon comes back",
+        o.cvars.SoftTargetIconGameObject == "1" and o.account.glimmerSoftCVars.SoftTargetIconGameObject == "0")
+    o.cvars.SoftTargetInteractOnlyInRange = "1"
+    o.Fire("CVAR_UPDATE", "softtargetinteractonlyinrange", "1")
+    check("the range setting comes back too, whatever case the event names it in",
+        o.cvars.SoftTargetInteractOnlyInRange == "0")
+    o.game.combat = true
+    o.cvars.SoftTargetIconGameObject = "0"
+    o.Fire("CVAR_UPDATE", "SoftTargetIconGameObject", "0")
+    check("in combat nothing is written", o.cvars.SoftTargetIconGameObject == "0")
+    o.game.combat = false
+    o.Fire("PLAYER_REGEN_ENABLED")
+    check("after combat it comes back", o.cvars.SoftTargetIconGameObject == "1")
+    o.Set("enabled", false)
+    check("off: the player's last choice is what comes back", o.cvars.SoftTargetIconGameObject == "0"
+        and o.cvars.SoftTargetInteractOnlyInRange == "1")
+end
+
+-- A corpse with loot for you: dark until Corpses with Loot is on, then lit with only its name on the plate.
+-- UNIT_LOOT for the soft target reads it again, so loot arriving late lights it and loot gone, whoever took
+-- it, darkens it. Dark too when the loot is not yours or its GUID is secret.
+do
+    local c = Session({ enabled = true })
+    c.Login()
+    local parts = { HealthBarsContainer = Widget(c), LevelFrame = Widget(c), PlayerLevelDiffFrame = Widget(c),
+        SoftTargetFrame = Widget(c) }
+    c.game.plate = Plate(c)
+    c.game.plate.UnitFrame = parts
+    local guid = "Creature-0-1-2-3-4-5"
+    c.game.guid, c.game.object, c.game.dead, c.game.loot, c.game.canLoot = guid, false, true, true, true
+    c.Fire("PLAYER_SOFT_INTERACT_CHANGED", "", "x")
+    check("corpses: off by default", Lit(c) == nil and c.cvars.SoftTargetNameplateInteract == "0")
+    check("off: no loot asked about, no UNIT_LOOT", c.lootAsked == nil and not Listening(c, "UNIT_LOOT"))
+    c.Set("corpse", true)
+    check("corpses on: UNIT_LOOT is listened to", Listening(c, "UNIT_LOOT"))
+    check("one with loot for you lights up", Lit(c) ~= nil and c.cvars.SoftTargetNameplateInteract == "1")
+    check("with only its name on the plate", parts.HealthBarsContainer.alpha == 0
+        and parts.LevelFrame.alpha == 0 and parts.PlayerLevelDiffFrame.alpha == 0)
+    check("in the corpse color", Lit(c).r == 0.74 and Lit(c).b == 1 and LineText(c) == nil)
+    c.game.loot = false
+    c.Fire("UNIT_LOOT", "Creature-0-1-2-3-4-6", false)
+    check("another unit's loot changing leaves it as it was", Lit(c) ~= nil)
+    c.Fire("UNIT_LOOT", guid, false)
+    check("its loot gone, whoever took it: dark, and the plate gets its bar back", Lit(c) == nil
+        and parts.HealthBarsContainer.alpha == 1 and parts.LevelFrame.alpha == 1
+        and parts.PlayerLevelDiffFrame.alpha == 1)
+    c.game.loot = true
+    c.Fire("UNIT_LOOT", guid, true)
+    check("loot arriving after it was read: lit", Lit(c) ~= nil)
+    c.game.loot, c.game.canLoot = true, false
+    c.Fire("PLAYER_SOFT_INTERACT_CHANGED", "x", "y")
+    check("loot that is someone else's: dark", Lit(c) == nil)
+    c.game.dead, c.game.canLoot = false, true
+    c.Fire("PLAYER_SOFT_INTERACT_CHANGED", "y", "x")
+    check("a living creature is no corpse", Lit(c) == nil)
+    c.game.dead, c.lootAsked = true, nil
+    c.env.issecretvalue = function(v) return v == c.game.guid end
+    c.Fire("PLAYER_SOFT_INTERACT_CHANGED", "x", "y")
+    check("a secret GUID is never asked about", Lit(c) == nil and c.lootAsked == nil)
+    c.env.issecretvalue = nil
+    c.Fire("PLAYER_SOFT_INTERACT_CHANGED", "y", "x")
+    check("a plain one is", Lit(c) ~= nil and c.lootAsked == c.game.guid)
+    c.Fire("PLAYER_REGEN_DISABLED")
+    c.game.combat = true
+    c.Fire("UNIT_LOOT", guid, true)
+    check("UNIT_LOOT in combat: Glimmer rests, nothing lit or written", Lit(c) == nil
+        and c.cvars.SoftTargetNameplateInteract == "0")
+    c.game.combat, c.game.instance = false, true
+    c.Fire("UNIT_LOOT", guid, true)
+    check("and in a dungeon", Lit(c) == nil)
+    c.game.instance = false
+    c.Fire("PLAYER_REGEN_ENABLED")
+    check("out of both: lit again", Lit(c) ~= nil)
+    c.Set("corpse", false)
+    check("corpses off again: dark, and UNIT_LOOT dropped", Lit(c) == nil and not Listening(c, "UNIT_LOOT"))
+end
+
+-- A lit chest that counts for a quest, once the quest is done: on the same nameplate it is only repainted as a
+-- chest, not started over.
+do
+    local q = Session({ enabled = true })
+    q.Login()
+    q.game.guid, q.game.plate, q.game.related = GUID(CHEST), Plate(q), true
+    q.Fire("PLAYER_SOFT_INTERACT_CHANGED", "", "x")
+    local lit = Lit(q)
+    for _ = 1, 20 do lit.OnUpdate(lit, 0.05) end
+    check("a chest for a quest lights as a quest object and fades in", lit.r == 1 and lit.appear == 1)
+    q.game.related = false
+    q.Fire("QUEST_LOG_UPDATE")
+    check("its quest done: the same effect in the chest color, not started over", Lit(q) == lit
+        and lit.r == 0.30 and lit.appear == 1)
+end
+
+-- A lit quest giver that dies with loot for you while it stays the soft target: on the same nameplate it is
+-- attached again as a corpse, so its bar goes.
+do
+    local g = Session({ enabled = true, corpse = true })
+    g.Login()
+    local parts = { HealthBarsContainer = Widget(g), LevelFrame = Widget(g), PlayerLevelDiffFrame = Widget(g),
+        SoftTargetFrame = Widget(g) }
+    g.game.plate = Plate(g)
+    g.game.plate.UnitFrame = parts
+    local guid = "Creature-0-1-2-3-7-8"
+    g.game.guid, g.game.object, g.game.cursor = guid, false, "Interface\\Cursor\\Quest"
+    g.Fire("PLAYER_SOFT_INTERACT_CHANGED", "", "x")
+    check("a quest giver lit with its bar", Lit(g) ~= nil and parts.HealthBarsContainer.alpha == nil)
+    g.game.cursor, g.game.dead, g.game.loot, g.game.canLoot = nil, true, true, true
+    g.Fire("UNIT_LOOT", guid, true)
+    check("dead with loot for you: a corpse on the same plate, its bar gone", Lit(g) ~= nil
+        and parts.HealthBarsContainer.alpha == 0 and parts.PlayerLevelDiffFrame.alpha == 0)
+end
+
+-- The game's interact cog on the soft target's nameplate: one size at the UI's scale while Glimmer is on,
+-- whatever the nameplate's own scale, and given back after.
+do
+    local c = Session({ enabled = true })
+    c.Login()
+    c.env.UIParent.GetEffectiveScale = function() return 0.5 end
+    local base = Plate(c)
+    local cog = base.UnitFrame.SoftTargetFrame
+    local size = 0.5 * c.ns.Glimmer.Style.COG_SIZE / cog:GetWidth()
+    c.game.guid, c.game.plate = GUID(999999), base
+    c.Fire("PLAYER_SOFT_INTERACT_CHANGED", "", "x")
+    check("an object's cog leaves the nameplate's scale for the UI's", cog.ignoreScale == true and cog.scale == size)
+    c.Fire("NAME_PLATE_UNIT_REMOVED", "nameplate1")
+    check("given back with its nameplate", cog.ignoreScale == false and cog.scale == 1)
+    c.Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    check("sized again when the nameplate comes back", cog.ignoreScale == true and cog.scale == size)
+    c.game.guid, c.game.object, c.game.plate = nil, true, nil
+    c.Fire("PLAYER_SOFT_INTERACT_CHANGED", "x", "")
+    check("given back when nothing is the soft target", cog.ignoreScale == false and cog.scale == 1)
+    c.game.guid, c.game.object, c.game.plate = "Creature-0-1-2-3-4-5", false, base
+    c.game.combat = true
+    c.Fire("PLAYER_SOFT_INTERACT_CHANGED", "", "y")
+    check("an NPC's too, in a fight as well", cog.ignoreScale == true and cog.scale == size)
+    c.game.combat = false
+    c.Set("enabled", false)
+    check("given back when Glimmer is turned off", cog.ignoreScale == false and cog.scale == 1)
+end
+
+-- Other addons on the same settings: asked once, then the reload prompt.
+do
+    local loaded = {}
+    for _, addon in ipairs(Session({}).ns.Glimmer.C.OTHER_ADDONS) do loaded[addon] = true end
+    local c = Session({ enabled = true }, { loaded = loaded })
+    c.Login()
+    check("every other one named in one question", #c.confirms == 1
+        and select(2, c.confirms[1].text:gsub(" and ", "")) >= 1)
+    c.Set("size", 1.2)
+    check("asked once a session", #c.confirms == 1)
+    c.confirms[1].yes()
+    check("yes: disabled, then the house reload prompt", next(c.game.loaded) == nil and #c.reloads == 1)
+end
+
+-- Minimap icons: off until switched on, then the data loads and the spots near you show.
+do
+    local m = Session({ enabled = true })
+    m.Login()
+    check("map features off: the spot data is not loaded", m.dataLoaded == nil)
+    m.Set("minimapIcons", true)
+    check("minimap icons on: the packed spots are unpacked, once, and let go", type(m.dataLoaded) == "string"
+        and #m.dataLoaded > 0 and m.ns.GlimmerSpotsPacked == nil and m.ns.GlimmerSpots[1429] ~= nil)
+    local shown = {}
+    for _, f in ipairs(m.frames) do
+        if f.ring and f.shown and f.id then shown[#shown + 1] = f end
+    end
+    check("a miner sees the near vein, not the herb or the far vein", #shown == 1 and shown[1].id == 1731)
+    check("ringed in its skill-up color", shown[1].ring.color[1] == m.ns.Glimmer.Style.TIER_RGB.green.r)
+    check("placed toward its spot", shown[1].point[4] == 0 and shown[1].point[5] < 0)
+    m.game.herbalism = 50
+    m.Fire("SKILL_LINES_CHANGED")
+    local n = 0
+    for _, f in ipairs(m.frames) do if f.ring and f.shown and f.id then n = n + 1 end end
+    check("an herbalist and miner sees both", n == 2)
+end
+
+-- Only My Professions: a character with neither gathering profession sees no spots; switched off, all of them.
+do
+    local m = Session({ enabled = true, minimapIcons = true })
+    m.game.mining = 0
+    m.Login()
+    local function Shown()
+        local n = 0
+        for _, f in ipairs(m.frames) do if f.ring and f.shown and f.id then n = n + 1 end end
+        return n
+    end
+    check("no herbalism or mining: no spots, and the spot data stays packed", Shown() == 0 and m.dataLoaded == nil)
+    m.Set("myProfessions", false)
+    check("Only My Professions off: every near spot", Shown() == 2)
+end
+
+-- Find Minerals on: the vein's icon moves onto the ring, leaving the game's own dot to show inside it.
+do
+    local m = Session({ enabled = true, minimapIcons = true })
+    m.Login()
+    local pin
+    for _, f in ipairs(m.frames) do if f.ring and f.shown and f.id then pin = f end end
+    check("not tracking: the icon sits in the middle", pin.icon.point[1] == "CENTER" and pin.icon.point[2] == nil)
+    m.game.tracking = 2580
+    m.Fire("MINIMAP_UPDATE_TRACKING")
+    check("Find Minerals on: the icon moves to the ring's edge", pin.icon.point[2] > 0 and pin.icon.point[3] < 0)
+    m.game.tracking = 2383
+    m.Fire("MINIMAP_UPDATE_TRACKING")
+    check("Find Herbs alone leaves a vein's icon in the middle", pin.icon.point[2] == nil)
+end
+
+-- Gathered: noted on loot, at the spot it grows, and shown on the world map.
+do
+    local g = Session({ enabled = true, gatheredPins = true })
+    g.Login()
+    check("gathered nodes listen when loot data is ready", Listening(g, "LOOT_READY") and not Listening(g, "LOOT_OPENED"))
+    check("gathered pins alone do not load the spot data", g.dataLoaded == nil)
+    g.game.guid, g.game.near, g.game.px, g.game.py = GUID(COPPER), true, 0.501, 0.519
+    g.game.lootFrom = "Creature-0-1-2-3-99-0000000001"
+    g.Fire("LOOT_READY")
+    check("a corpse looted beside a vein is not a gather", g.account.glimmerGathered == nil)
+    g.game.lootFrom = nil
+    g.Fire("LOOT_READY")
+    local map = g.account.glimmerGathered and g.account.glimmerGathered[1429]
+    local entry = map and map["1731:501:519"]
+    check("a gathered vein is noted where you stand", entry ~= nil and entry.count == 1)
+    g.Fire("LOOT_READY")
+    check("the same loot window opened again counts once", entry.count == 1)
+    g.game.guid, g.game.px, g.game.py = "GameObject-0-1-2-3-1731-0000ABCDF0", 0.503, 0.517
+    g.Fire("LOOT_READY")
+    check("the node grown back counts on the same pin", entry.count == 2)
+    g.game.guid, g.game.near = nil, false
+    g.game.lootFrom = "GameObject-0-1-2-3-1731-0000ABCDF1"
+    g.Fire("LOOT_READY")
+    check("successful loot records without a soft target", entry.count == 3)
+    g.game.mapShown = true
+    g.provider:RefreshAllData()
+    check("on the world map", #g.game.pins == 1 and g.game.pins[1] == entry)
+    g.game.mining = 0
+    g.provider:RefreshAllData()
+    check("an alt with no gathering still sees the account's gathers", #g.game.pins == 1)
+    g.Set("ore", false)
+    g.provider:RefreshAllData()
+    check("ore off: not on the map", #g.game.pins == 0)
+end
+
+do
+    local g = Session({ enabled = true, gatheredPins = true })
+    g.Login()
+    g.env.UnitGUID = function() error("recording must not depend on a soft target") end
+    g.game.lootSlots = { { "Creature-0-1-2-3-1731-0000ABCDEF", 1 } }
+    g.Fire("LOOT_READY")
+    check("ore from a corpse is not a gathered vein", not g.account.glimmerGathered)
+    g.game.lootSlots = { { "GameObject-0-1-2-3-999999-0000ABCDEF", 1 } }
+    g.Fire("LOOT_READY")
+    check("unknown objects are not gathered nodes", not g.account.glimmerGathered)
+    local secret = GUID(COPPER)
+    g.env.issecretvalue = function(value) return value == secret end
+    g.game.lootSlots = { { secret, 1 } }
+    g.Fire("LOOT_READY")
+    check("secret loot sources are ignored", not g.account.glimmerGathered)
+    g.env.issecretvalue = nil
+    g.game.lootSlots = { { "Creature-0-1-2-3-99-0000ABCDEF", 1 },
+        { "GameObject-0-1-2-3-999999-0000ABCDEF", 1, GUID(COPPER), 2 } }
+    g.Fire("LOOT_READY")
+    local nodes = g.account.glimmerGathered and g.account.glimmerGathered[1429]
+    local copper = nodes and nodes["1731:500:500"]
+    check("known node in later slot and source pair records without interact key", copper and copper.count == 1)
+    g.Fire("LOOT_READY")
+    check("multiple loot slots and repeated readiness count a node once", copper.count == 1)
+    g.game.lootSlots = { { GUID(1618), 1 } }
+    g.Fire("LOOT_READY")
+    check("herb loot also records without a soft target", nodes["1618:500:500"].count == 1)
+end
+
+-- A look setting repaints the lit effect without starting it over; a nameplate that is not the soft target
+-- is passed over.
+do
+    local r = Session({ enabled = true })
+    r.Login()
+    r.game.guid, r.game.plate = GUID(COPPER), Plate(r)
+    r.Fire("PLAYER_SOFT_INTERACT_CHANGED", "", "x")
+    local lit = Lit(r)
+    for _ = 1, 20 do lit.OnUpdate(lit, 0.05) end
+    check("faded in", lit.appear == 1)
+    r.Set("size", 1.3)
+    check("a size change repaints in place", Lit(r) == lit and lit.size == 1.3 and lit.appear == 1)
+    r.Set("brightness", 0.5)
+    check("and so does brightness", lit.alpha == 0.5 and lit.appear == 1)
+    local writes = #r.writes
+    r.Set("range", 12)
+    check("range writes the game setting, and leaves the effect", r.cvars.SoftTargetInteractRange == "12"
+        and #r.writes == writes + 1 and lit.appear == 1)
+    r.game.guid = nil
+    r.Fire("PLAYER_SOFT_INTERACT_CHANGED", "x", "")
+    r.game.guid = GUID(COPPER)
+    local reads = 0
+    local Read = r.ns.Glimmer.Target.Read
+    r.ns.Glimmer.Target.Read = function(...) reads = reads + 1; return Read(...) end
+    r.Fire("NAME_PLATE_UNIT_ADDED", "nameplate9")
+    check("another unit's nameplate is passed over", reads == 0)
+    r.Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    check("the soft target's is read", reads == 1)
+end
+
+-- The quest sparkle comes back whatever case the game names the setting in.
+do
+    local q = Session({ enabled = true, questSparkle = true })
+    q.Login()
+    q.cvars.outlineModeShowLootEffectWhenDisabled = "0"
+    q.Fire("CVAR_UPDATE", "outlinemodeshowlooteffectwhendisabled", "0")
+    q.RunTimers()
+    check("a lower-case name still puts the sparkle back", q.cvars.outlineModeShowLootEffectWhenDisabled == "1")
+end
+
+-- The outlines an older version turned off for the sparkle come back, and the sparkle stays.
+do
+    local o = Session({ enabled = true, questSparkle = true })
+    o.cvars.graphicsOutlineMode, o.cvars.OutlineEngineMode = "0", "0"
+    o.cvars.raidGraphicsOutlineMode, o.cvars.RAIDOutlineEngineMode = "0", "0"
+    o.cvars.outlineModeShowLootEffectWhenDisabled = "1"
+    o.account.glimmerSparkleCVars = { outlineModeShowLootEffectWhenDisabled = "0", graphicsOutlineMode = "2",
+        OutlineEngineMode = "2", raidGraphicsOutlineMode = "1", RAIDOutlineEngineMode = "1" }
+    o.Login()
+    check("old outlines: put back", o.cvars.graphicsOutlineMode == "2" and o.cvars.OutlineEngineMode == "2"
+        and o.cvars.raidGraphicsOutlineMode == "1" and o.cvars.RAIDOutlineEngineMode == "1")
+    local saved = o.account.glimmerSparkleCVars
+    check("old outlines: forgotten, the loot effect still saved", saved.graphicsOutlineMode == nil
+        and saved.raidGraphicsOutlineMode == nil and saved.outlineModeShowLootEffectWhenDisabled == "0")
+    check("old outlines: the sparkle stays on", o.cvars.outlineModeShowLootEffectWhenDisabled == "1")
+end
+
+-- With the addon turned off, the core puts Glimmer's saved game settings back at login.
+do
+    local f = assert(io.open("Core/Core.lua", "rb"))
+    local source = f:read("*a"):gsub("\r\n", "\n")
+    f:close()
+    local first = assert(source:find("local function RestoreGlimmerSettings()", 1, true))
+    local last = assert(source:find("\nlocal meterCheck", first, true))
+    local names = assert(source:match("\n(local GLIMMER_ADDON, .-\n)"))
+    local account = { glimmerSoftCVars = { SoftTargetInteract = "1" }, glimmerSparkleCVars = { graphicsOutlineMode = "2" } }
+    local cvars, loaded, combat = { SoftTargetInteract = "3", graphicsOutlineMode = "0" }, true, false
+    local chunk = assert(loadstring(names .. source:sub(first, last) .. "return RestoreGlimmerSettings"))
+    setfenv(chunk, setmetatable({
+        ns = { AccountSettings = function() return account end },
+        C_AddOns = { IsAddOnLoaded = function(name) return loaded and name == "NaowhForever_QoL" end },
+        InCombatLockdown = function() return combat end,
+        C_CVar = { SetCVar = function(k, v) cvars[k] = v end },
+    }, { __index = _G }))
+    local Restore = chunk()
+    Restore()
+    check("core: Glimmer loaded puts them back itself", cvars.SoftTargetInteract == "3" and account.glimmerSoftCVars)
+    loaded, combat = false, true
+    Restore()
+    check("core: not in combat", cvars.SoftTargetInteract == "3")
+    combat = false
+    Restore()
+    check("core: Glimmer off: both sets put back and forgotten", cvars.SoftTargetInteract == "1"
+        and cvars.graphicsOutlineMode == "2" and account.glimmerSoftCVars == nil and account.glimmerSparkleCVars == nil)
+end
+
+-- With the spot data loaded, a first gather is pinned at the data's own spot.
+do
+    local d = Session({ enabled = true, gatheredPins = true, minimapIcons = true })
+    d.Login()
+    d.game.guid, d.game.near, d.game.px, d.game.py = GUID(COPPER), true, 0.501, 0.519
+    d.Fire("LOOT_READY")
+    local map = d.account.glimmerGathered and d.account.glimmerGathered[1429]
+    check("snapped to the spot it grows", map and map["1731:500:520"] ~= nil)
+end
+
+-- A category color, with Skill-Up Colors off, repaints the minimap rings.
+do
+    local c = Session({ enabled = true, minimapIcons = true, skillColors = false })
+    c.Login()
+    c.Set("oreColor", { r = 0.1, g = 0.2, b = 0.3 })
+    local ring
+    for _, f in ipairs(c.frames) do if f.ring and f.shown and f.id then ring = f.ring end end
+    check("the ring takes the new color", ring and ring.color[1] == 0.1 and ring.color[3] == 0.3)
+end
+
+-- Gathered on OpenMap's seamless map (last: the map stays stitched for the session's OpenMap): a node of
+-- the zone beside the map underneath is pinned where OpenMap draws it, knowing its own map, and its
+-- waypoint is on that map.
+do
+    local g = Session({ enabled = true, gatheredPins = true })
+    g.Login()
+    local api = STITCH({ [1429] = { 0.4, 0.4, 0.5, 0.5 }, [1430] = { 0.5, 0.4, 0.6, 0.5 } })
+    local here = { id = COPPER, x = 500, y = 500, count = 1, last = 0 }
+    local beside = { id = COPPER, x = 100, y = 500, count = 1, last = 0 }
+    g.account.glimmerGathered = { [1429] = { here = here }, [1430] = { beside = beside } }
+    g.game.mapShown = true
+    g.provider:RefreshAllData()
+    local at = g.game.at[beside]
+    check("a node of the zone beside it is pinned too", #g.game.pins == 2 and at ~= nil)
+    check("where OpenMap draws it, past the map underneath's edge, knowing its own map",
+        math.abs(at[1] - 1.1) < 1e-9 and math.abs(at[2] - 0.5) < 1e-9 and at[3] == 1430)
+    g.env.NaowhForeverGatheredPinMixin.OnClick({ entry = beside, node = g.ns.Glimmer.NODES[COPPER], mapID = 1430 },
+        "LeftButton")
+    check("its waypoint is on its own map", g.waypoint and g.waypoint[2] == 1430 and g.waypoint[3] == 10)
+    api.stitched = false
+end
+
+print(("test-glimmer: %d checks passed"):format(checks))

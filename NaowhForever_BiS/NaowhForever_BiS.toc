@@ -1,0 +1,10 @@
+## Interface: 16001
+## Title: |cff0091edNaowh|r Forever: BiS List
+## Notes: Best-in-slot lists, stat weights, Gear Score, the character panel and the inspect window.
+## Author: Naowh
+## Version: 1.4.2
+## Dependencies: NaowhForever
+## Group: NaowhForever
+## IconTexture: Interface\AddOns\NaowhForever\Core\Media\LogoAddon.tga
+
+BiS.xml

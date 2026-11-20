@@ -1,0 +1,32 @@
+-- Spots.lua: where the NPC that drops or sells a ranked BiS item stands (Tools/build/bis_spots.py).
+local ns = _G.NaowhForever
+
+ns.BiSSpots = {
+    [897] = { npc = 206, name = "Nightbane Vile Fang", map = 1431, x = 70.1, y = 73.3, roams = true },
+    [2017] = { npc = 785, name = "Skeletal Warder", map = 1431, x = 16, y = 34.4, roams = true },
+    [2234] = { npc = 920, name = "Nightbane Tainted One", map = 1431, x = 63.1, y = 80.3, roams = true },
+    [3073] = { npc = 1069, name = "Crimson Whelp", map = 1437, x = 64, y = 40.5, roams = true },
+    [4454] = { npc = 462, name = "Vultros", map = 1436, x = 52.4, y = 25 },
+    [4464] = { npc = 771, name = "Commander Felstrom", map = 1431, x = 15.8, y = 35.2, roams = true },
+    [4724] = { npc = 2345, name = "Dun Garok Rifleman", map = 1424, x = 70.6, y = 77.4, roams = true },
+    [5183] = { npc = 3398, name = "Gesharahan", map = 1413, x = 46.4, y = 39.4 },
+    [5754] = { npc = 3792, name = "Terrowulf Packlord", map = 1440, x = 50.6, y = 38.4 },
+    [6198] = { npc = 1140, name = "Razormaw Matriarch", map = 1437, x = 68, y = 30, roams = true },
+    [6204] = { npc = 507, name = "Fenros", map = 1431, x = 62.6, y = 41.2, roams = true },
+    [11306] = { npc = 3410, name = "Jin'sora", map = 1454, x = 77.8, y = 38.6, sells = true },
+    [12248] = { npc = 14846, name = "Lhara", map = 1429, x = 41.2, y = 69.8, sells = true },
+    [274743] = { npc = 265574, name = "Winklespark", map = 1413, x = 62.6, y = 37.6, sells = true },
+    [282716] = { npc = 14276, name = "Scargil", map = 1424, x = 24.7, y = 66.5, roams = true },
+    [284401] = { npc = 5928, name = "Sorrow Wing", map = 1442, x = 49.8, y = 37.2, roams = true },
+    [285190] = { npc = 5934, name = "Heartrazor", map = 1441, x = 16.6, y = 41.4 },
+    [285330] = { npc = 5831, name = "Swiftmane", map = 1413, x = 60.4, y = 33, roams = true },
+    [285331] = { npc = 5828, name = "Humar the Pridelord", map = 1413, x = 62, y = 33.6 },
+    [285338] = { npc = 5827, name = "Brontus", map = 1413, x = 47.5, y = 61.9, roams = true },
+    [285344] = { npc = 5851, name = "Captain Gerogg Hammertoe", map = 1413, x = 49.4, y = 83.6 },
+    [285346] = { npc = 5798, name = "Thora Feathermoon", map = 1413, x = 47.3, y = 60.4, roams = true },
+    [285347] = { npc = 5797, name = "Aean Swiftriver", map = 1413, x = 45.1, y = 64.8, roams = true },
+    [285348] = { npc = 5799, name = "Hannah Bladeleaf", map = 1413, x = 45.1, y = 64.7, roams = true },
+    [286991] = { npc = 247003, name = "Seeking Remnant", map = 1416, x = 15.4, y = 69.8, roams = true },
+    [286992] = { npc = 246664, name = "Fragmented Sentry", map = 1416, x = 19.4, y = 66.9, roams = true },
+    [286994] = { npc = 247003, name = "Seeking Remnant", map = 1416, x = 15.4, y = 69.8, roams = true },
+}

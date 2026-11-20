@@ -1,0 +1,11 @@
+## Interface: 16001
+## Title: |cff0091edNaowh|r Forever: Utilities
+## Notes: Instance Tracker, Journeys, Macros, Group Inspect, Action Bars, Racial and Class Tracking, and the Undermine Real Reminder, each with its own switch under Settings > Modules.
+## Author: Naowh
+## Version: 1.4.2
+## Dependencies: NaowhForever
+## OptionalDeps: NaowhForever_BiS
+## Group: NaowhForever
+## IconTexture: Interface\AddOns\NaowhForever\Core\Media\LogoAddon.tga
+
+Utilities.xml

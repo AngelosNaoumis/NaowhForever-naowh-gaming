@@ -1,0 +1,411 @@
+-- BuffReminders.lua: the Buffs & Consumables row of icons on screen, refreshed out of combat.
+local ns = _G.NaowhForever
+
+local A = ns.AuraBuffs
+local S = A.Settings
+local D = ns.BuffReminderData
+local R, Cell, Menu, Glow = A.Buffs, A.BuffCell, A.BuffMenu, A.Glow
+local ItemBar, Parts = ns.Shared.ItemBar, ns.Shared.Parts
+local Left, Secret, GROUP_UNIT = R.Left, R.Secret, R.GROUP_UNIT
+
+local QUEUE_DELAY = 0.3
+local ELIXIR_ICON = 13454
+local WAKE_PAD = 0.1
+local WAKE_SAME = 0.01
+local RANGE_INTERVAL = 0.5
+local HOME_Y = 220
+local MAIN_HAND = 16
+local CARD = A.PAGE .. ":buffs"
+local TEXT_MOVER = "Buff Reminders"
+local KEYS = {
+    enabled = true, consumablesMinutes = true,
+    consumablesWorld = true, consumablesDungeon = true, consumablesRaid = true,
+    raidBuffsWorld = true, raidBuffsDungeon = true, raidBuffsRaid = true,
+    personalBuffsWorld = true, personalBuffsDungeon = true, personalBuffsRaid = true, personalBuffsSeconds = true, battleShoutSeconds = true,
+    consumablesMaxHide = true, raidBuffsMaxHide = true, personalBuffsMaxHide = true,
+    onlyIfCarried = true, carriedPicks = true, consumablePicks = true, hideResting = true, raidBuffs = true, raidBuffsOwn = true, raidBuffPicks = true, iconSize = true,
+    buffIconMode = true, raidBuffRange = true, raidBuffRangeHide = true, hideBlessingsOnPaladin = true,
+    personalBuffs = true, personalBuffPicks = true, personalBuffExtra = true, thornsTankOnly = true, weaponEnhancements = true, leftClickMainHand = true, sleepingBag = true,
+    elementalAttractor = true,
+    otherBuffs = true,
+    buffsFont = true, buffsFontSize = true, buffsOutline = true, buffsBorderColor = true,
+    buffGlow = true, buffGlowType = true, buffGlowColor = true, buffGlowLines = true, buffGlowThickness = true,
+    buffGlowSpeed = true,
+}
+local PREVIEW = {
+    { spell = D.WELL_FED[1], kind = "food" }, { item = D.FLASKS.items[1], kind = "flask" },
+    { item = ELIXIR_ICON, kind = "battle" },
+    { item = D.SCROLLS[4].items[4], count = 2, kind = "scroll" }, { raid = true, count = 3 },
+}
+
+local frame, unlocked, pending, held, bagShown
+local wakeTimer, wakeDue
+local rangeTicker, rangeList
+local sentGUID, sentSpell, sentAt, sentSelf
+local claimGUID, claimCell
+local cells = {}
+local events = CreateFrame("Frame")
+local Queue
+
+local function OnCellHide(cell)
+    if Menu.OwnedBy(cell) then Menu.Hide() end
+end
+
+local function OnCellEnter(cell)
+    Menu.Open(cell)
+end
+
+local function OnCellLeave()
+    Menu.Leave()
+end
+
+local function OnCellUsed(cell, button, down)
+    if button == "LeftButton" then
+        if sentGUID and sentAt == GetTime() and sentSpell == cell.spell then claimGUID, claimCell = sentGUID, cell end
+        return
+    end
+    if button ~= "MiddleButton" or down or not cell.key then return end
+    R.Hide(cell.key)
+    Queue()
+end
+
+local function GetCell(i)
+    local cell = cells[i]
+    if cell then return cell end
+    cell = Cell.New(frame, "SecureActionButtonTemplate")
+    cell:EnableMouse(true)
+    cell:RegisterForClicks("AnyUp", "AnyDown")
+    cell:SetScript("PostClick", OnCellUsed)
+    Parts.Press(cell)
+    cell:SetScript("OnEnter", OnCellEnter)
+    cell:SetScript("OnLeave", OnCellLeave)
+    cell:SetScript("OnHide", OnCellHide)
+    cell.timer = CreateFrame("Cooldown", nil, cell, "CooldownFrameTemplate")
+    cell.timer:SetAllPoints()
+    cell.timer:SetDrawEdge(false)
+    cell.timer:SetReverse(true)
+    cells[i] = cell
+    return cell
+end
+
+local function ShowTimer(cell, aura)
+    if aura and Left(aura) and not Secret(aura.duration) then
+        cell.timer:SetCooldown(aura.expirationTime - aura.duration, aura.duration)
+        cell.timer:Show()
+    else
+        cell.timer:Hide()
+    end
+end
+
+local function StopRange()
+    if rangeTicker then rangeTicker:Cancel() end
+    rangeTicker, rangeList = nil, nil
+end
+
+local function Hides(entry, inRange)
+    return S.Get("raidBuffRangeHide") and inRange == 0 and entry.rangeSpell ~= nil or false
+end
+
+local function PaintRange(cell, entry, inRange)
+    local missing = entry.rangeUnits and #entry.rangeUnits
+    if missing or cell.rangeTracked then
+        Cell.Range(cell, inRange, missing)
+        cell.rangeTracked = missing ~= nil and true or nil
+    end
+    Glow.Set(cell, S.Get("buffGlow") and not unlocked and (not missing or inRange > 0), "buffGlow")
+end
+
+local function OnRangeTick()
+    if not R.On() or not S.Get("raidBuffRange") or not frame:IsShown() then return StopRange() end
+    if InCombatLockdown() or C_Secrets.ShouldAurasBeSecret() then return end
+    for _, entry in ipairs(rangeList) do
+        if entry.rangeUnits then
+            local inRange = R.InRange(entry)
+            if Hides(entry, inRange) ~= not entry.cell then return Queue() end
+            if entry.cell then PaintRange(entry.cell, entry, inRange) end
+        end
+    end
+end
+
+local function RangeMoves(entry)
+    if not (entry.rangeUnits and entry.rangeSpell) then return false end
+    for _, unit in ipairs(entry.rangeUnits) do
+        if not UnitIsUnit(unit, "player") then return true end
+    end
+    return false
+end
+
+local function SetAction(cell, entry)
+    local slot = entry.slot and S.Get("leftClickMainHand") and MAIN_HAND or entry.slot
+    if entry.item and slot then ItemBar.SetWeapon(cell, entry.item, slot) else ItemBar.SetItem(cell, entry.item) end
+    cell.slot, cell.unit = slot, entry.unit
+    cell:SetAttribute("spell1", entry.spell)
+    cell:SetAttribute("unit1", entry.unit)
+    if entry.spell then cell:SetAttribute("type1", "spell") elseif not entry.item then cell:SetAttribute("type1", nil) end
+end
+
+local function Show(list)
+    claimGUID, claimCell = nil, nil
+    local size = S.Get("iconSize")
+    local moving, shown, bag = false, 0, false
+    for _, entry in ipairs(list) do
+        local inRange = entry.rangeUnits and R.InRange(entry)
+        if not Hides(entry, inRange) then
+            shown = shown + 1
+            local cell = GetCell(shown)
+            Cell.Place(cell, frame, shown, size, entry.icon, entry.count)
+            cell.rangeIn, cell.rangeMissing = nil, nil
+            cell.items, cell.key = entry.items, entry.key
+            cell.spell, cell.single, cell.solo = entry.spell, entry.single, entry.solo
+            SetAction(cell, entry)
+            ShowTimer(cell, entry.aura)
+            cell:SetAlpha(1)
+            cell:Show()
+            PaintRange(cell, entry, inRange)
+            entry.cell = cell
+            if entry.key == "sleepingBag" then bag = true end
+        end
+        if RangeMoves(entry) then moving = true end
+    end
+    for i = shown + 1, #cells do
+        Glow.Set(cells[i], false)
+        cells[i]:Hide()
+    end
+    bagShown = bag
+    Cell.Fit(frame, shown, size)
+    if moving then
+        rangeList = list
+        rangeTicker = C_Timer.NewTicker(RANGE_INTERVAL, OnRangeTick)
+    end
+    local owner = Menu.Owner()
+    if not owner then return end
+    if owner:IsShown() and owner.items then Menu.Open(owner) else Menu.Hide() end
+end
+
+local function PreviewList()
+    local list = {}
+    for _, p in ipairs(PREVIEW) do
+        local spell = p.raid and R.RaidSample() or p.spell
+        if p.item or spell then
+            list[#list + 1] = { icon = p.item and C_Item.GetItemIconByID(p.item) or C_Spell.GetSpellTexture(spell),
+                count = p.raid and S.Get("raidBuffRange") and ("1/" .. p.count) or p.count }
+        end
+    end
+    return list
+end
+
+local Refresh, Apply
+
+local function StopWake()
+    if wakeTimer then wakeTimer:Cancel() end
+    wakeTimer, wakeDue = nil, nil
+end
+
+local function OnWake()
+    wakeTimer, wakeDue = nil, nil
+    Refresh()
+end
+
+local function ArmWake(seconds)
+    local due = GetTime() + seconds
+    if wakeTimer and math.abs(due - wakeDue) < WAKE_SAME then return end
+    StopWake()
+    wakeDue = due
+    wakeTimer = C_Timer.NewTimer(seconds + WAKE_PAD, OnWake)
+end
+
+function Refresh()
+    pending = nil
+    if not frame or InCombatLockdown() then return end
+    StopRange()
+    if unlocked then return Show(PreviewList()) end
+    if not R.On() then return Show({}) end
+    local list = R.Collect()
+    if not list then return end
+    Show(list)
+    local wakeAt = R.WakeAt()
+    if wakeAt then ArmWake(wakeAt) else StopWake() end
+end
+
+function Queue()
+    if pending then return end
+    pending = true
+    C_Timer.After(QUEUE_DELAY, Refresh)
+end
+
+local function FadeCast(castGUID, spellID)
+    local onSelf = castGUID ~= nil and castGUID == sentGUID and sentSelf
+    if castGUID ~= nil and castGUID == claimGUID then
+        if claimCell:IsShown() and claimCell.single ~= false then claimCell:SetAlpha(0) end
+        claimGUID, claimCell = nil, nil
+    end
+    for _, cell in ipairs(cells) do
+        if cell:IsShown() and R.CastCovers(cell.key, spellID, onSelf and cell.solo ~= false) then cell:SetAlpha(0) end
+    end
+end
+
+local function FadeWeapons()
+    for _, cell in ipairs(cells) do
+        if cell:IsShown() and R.WeaponCovered(cell.key) then cell:SetAlpha(0) end
+    end
+end
+
+local function FadeTarget()
+    for _, cell in ipairs(cells) do
+        if cell:IsShown() and cell.unit == "target" then cell:SetAlpha(0) end
+    end
+end
+
+local function Sent(target, castGUID, spellID)
+    if Secret(castGUID) or Secret(spellID) then
+        sentGUID = nil
+        return
+    end
+    sentGUID, sentSpell, sentAt = castGUID, spellID, GetTime()
+    sentSelf = not Secret(target) and target == UnitName("player")
+end
+
+local function OnEvent(_, event, unit, arg2, arg3, arg4)
+    if event == "UNIT_SPELLCAST_SENT" then return Sent(arg2, arg3, arg4) end
+    local spellID = arg3
+    if event == "BAG_UPDATE_COOLDOWN" then
+        if bagShown and R.BagBusy() then Queue() end
+        return
+    end
+    if event == "UNIT_AURA" then R.AurasChanged(not Secret(unit) and unit or nil) end
+    if event == "GROUP_ROSTER_UPDATE" or event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_REGEN_ENABLED" then
+        R.AurasChanged()
+    end
+    if event == "UNIT_AURA" and (InCombatLockdown() or Secret(unit)
+        or not (GROUP_UNIT[unit] or unit == "target" and R.WatchesTarget())) then return end
+    if event == "PLAYER_LEVEL_UP" then R.NoteLevel(unit) end
+    if event == "PLAYER_REGEN_DISABLED" then
+        StopRange()
+        Menu.Hide()
+        FadeTarget()
+        return
+    end
+    if event == "PLAYER_REGEN_ENABLED" and held then return Apply() end
+    if event == "BAG_UPDATE_DELAYED" or event == "PLAYER_ENTERING_WORLD" then R.ForgetBags() end
+    if event == "ITEM_DATA_LOAD_RESULT" and not R.Requested(unit) then return end
+    if event == "UNIT_INVENTORY_CHANGED" or event == "WEAPON_ENCHANT_CHANGED" then FadeWeapons() end
+    if event == "UNIT_SPELLCAST_SUCCEEDED" and not Secret(spellID) then
+        FadeCast(not Secret(arg2) and arg2 or nil, spellID)
+    end
+    if event == "UNIT_SPELLCAST_SUCCEEDED" and (Secret(spellID)
+        or not (R.NoteImbueCast(spellID) or R.NoteFoodCast(spellID) or R.NoteUseCast(spellID))) then return end
+    Queue()
+end
+
+local function SavePosition(pos)
+    S.Set("buffsPos", pos)
+end
+
+local function Build()
+    frame = CreateFrame("Frame", "NaowhForeverBuffReminders", UIParent)
+    frame:SetMovable(true)
+    frame:SetClampedToScreen(true)
+    frame.mover = ns.UI.AttachMover(frame, TEXT_MOVER, SavePosition, A.PAGE, CARD)
+end
+
+local function Place()
+    local pos = S.Get("buffsPos")
+    frame:ClearAllPoints()
+    if pos then
+        frame:SetPoint(pos.point, UIParent, pos.relPoint, pos.x, pos.y)
+    else
+        frame:SetPoint("CENTER", UIParent, "CENTER", 0, HOME_Y)
+    end
+end
+
+local function Listen()
+    R.AurasChanged()
+    if S.Get("raidBuffs") or R.WatchesTanks() then
+        events:RegisterEvent("UNIT_AURA")
+        events:RegisterEvent("GROUP_ROSTER_UPDATE")
+    elseif R.WatchesTarget() then
+        events:RegisterUnitEvent("UNIT_AURA", "player", "target")
+    else
+        events:RegisterUnitEvent("UNIT_AURA", "player")
+    end
+    if R.WatchesTarget() then events:RegisterEvent("PLAYER_TARGET_CHANGED") end
+    if R.WatchesTanks() then events:RegisterEvent("PLAYER_ROLES_ASSIGNED") end
+    if R.WatchesLevel() then events:RegisterEvent("PLAYER_LEVEL_UP") end
+    if S.Get("personalBuffs") or S.Get("weaponEnhancements") then
+        events:RegisterUnitEvent("UNIT_INVENTORY_CHANGED", "player")
+        events:RegisterEvent("WEAPON_ENCHANT_CHANGED")
+    end
+    if S.Get("personalBuffs") or S.Get("raidBuffs") then events:RegisterUnitEvent("UNIT_SPELLCAST_SENT", "player") end
+    if S.Get("personalBuffs") or S.Get("raidBuffs") or R.WatchesImbue()
+        or not R.Carried("food") and R.ConsumablePicked("food")
+        or S.Get("buffIconMode") == "last" then
+        events:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
+    end
+    events:RegisterEvent("PLAYER_ENTERING_WORLD")
+    events:RegisterEvent("PLAYER_REGEN_ENABLED")
+    events:RegisterEvent("PLAYER_UPDATE_RESTING")
+    events:RegisterEvent("SPELLS_CHANGED")
+    events:RegisterEvent("BAG_UPDATE_DELAYED")
+    events:RegisterEvent("PLAYER_REGEN_DISABLED")
+    events:RegisterEvent("ITEM_DATA_LOAD_RESULT")
+    if S.Get("sleepingBag") then
+        events:RegisterEvent("BAG_UPDATE_COOLDOWN")
+        events:RegisterEvent("PLAYER_DEAD")
+        events:RegisterEvent("PLAYER_ALIVE")
+        events:RegisterEvent("PLAYER_UNGHOST")
+    end
+end
+
+function Apply()
+    A.Migrate()
+    if InCombatLockdown() then
+        if R.On() or unlocked or frame and frame:IsShown() then
+            held = true
+            events:RegisterEvent("PLAYER_REGEN_ENABLED")
+        end
+        return
+    end
+    held = nil
+    Menu.Hide()
+    events:UnregisterAllEvents()
+    StopWake()
+    StopRange()
+    if not (R.On() or unlocked) then
+        if frame then frame:Hide() end
+        return
+    end
+    if not frame then Build() end
+    Place()
+    frame.mover:SetShown(unlocked == true)
+    frame:Show()
+    if R.On() then Listen() end
+    Refresh()
+end
+
+local function OnSet(key)
+    if KEYS[key] then Apply() end
+end
+
+local function OnUnlock()
+    unlocked = R.On() == true
+    Menu.unlocked = unlocked
+    Apply()
+end
+
+local function OnLock()
+    unlocked = false
+    Menu.unlocked = false
+    if frame then Apply() end
+end
+
+A.BuffPreview = PREVIEW
+
+events:SetScript("OnEvent", OnEvent)
+hooksecurefunc(S, "Set", OnSet)
+ns.OnApply(Apply)
+hooksecurefunc(ns, "ShowUnlockMode", OnUnlock)
+hooksecurefunc(ns, "HideUnlockMode", OnLock)
+
+local boot = CreateFrame("Frame")
+boot:RegisterEvent("PLAYER_LOGIN")
+boot:SetScript("OnEvent", Apply)

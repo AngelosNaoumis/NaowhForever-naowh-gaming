@@ -1,0 +1,11 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!-- Utilities.xml: each Utilities module's own XML, in load order. -->
+    <Include file="InstanceTracker\InstanceTracker.xml"/>
+    <Include file="Journeys\Journeys.xml"/>
+    <Include file="Macros\Macros.xml"/>
+    <Include file="GroupInspect\GroupInspect.xml"/>
+    <Include file="GroupFinder\GroupFinder.xml"/>
+    <Include file="ActionBars\ActionBars.xml"/>
+    <Include file="TrackingReminder\TrackingReminder.xml"/>
+    <Include file="UndermineReal\UndermineReal.xml"/>
+</Ui>

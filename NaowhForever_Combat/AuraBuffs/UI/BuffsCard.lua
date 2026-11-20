@@ -1,0 +1,346 @@
+-- BuffsCard.lua: the Buffs & Consumables card on the AuraBuffs/Settings page, with its preview.
+local ns = _G.NaowhForever
+
+local A = ns.AuraBuffs
+local S = A.Settings
+local D = ns.BuffReminderData
+local T = ns.THEME
+local R, Cell = A.Buffs, A.BuffCell
+
+local Settings = ns.Shared and ns.Shared.Settings
+if not Settings then return end
+local Group = Settings.Group
+
+local STAGE_H, NOTE_Y, NOTE_SIZE, STAGE_MARGIN = 120, A.Style.STAGE_NOTE_Y, A.Style.STAGE_NOTE_SIZE, A.Style.STAGE_MARGIN
+local MINUTES_RANGE, ICON_RANGE, TEXT_RANGE = { 0, 10, 1 }, { 20, 96, 1 }, ns.Shared.Style.HUD_TEXT_RANGE
+local SECONDS_RANGE = { 0, MINUTES_RANGE[2] * A.C.SECONDS, 5 }
+local ICON_MODES = { { default = "Default", last = "Last Used" }, { "default", "last" } }
+local ORDER_BUFFS = 10
+local PREVIEW = A.BuffPreview
+local RAID_SAMPLE = #PREVIEW
+local SLEEPING_BAG = ns.Shared.Items.SLEEPING_BAG
+local STATES = {
+    { key = "raid", label = "In a Raid", tip = "In a raid, with each reminder you show in raids." },
+    { key = "world", label = "Open World", tip = "Out in the world, with each reminder you show in the world." },
+    { key = "resting", label = "Resting", tip = "In a city or an inn, where Hide While Resting hides them.",
+      needs = "hideResting" },
+}
+
+local OFF = ns.L("Turn on Buff Reminders")
+local NEEDS_RAID = ns.L("Needs Raid Buff Reminders")
+local NEEDS_PERSONAL = ns.L("Needs Personal Buff Reminders")
+local NEEDS_WEAPON = ns.L("Needs Weapon Enhancement Reminder")
+local NEEDS_RANGE = ns.L("Needs Show Buff Range")
+local NEEDS_THORNS = ns.L("Needs Thorns")
+local TEXT_WEAPON = "Weapon Enhancement"
+local TEXT_AT_60 = "Hide in the World at Level 60"
+local TEXT_CARRIED = "Off: a reminder even with none in your bags, so you know to buy some."
+local TEXT_PICK = "Off: no reminder for this kind."
+local TEXT_NOTHING = ns.L("Nothing to remind you of here.")
+local TEXT_BLESSINGS = ns.L("Off by default: the Blessings module covers them.")
+local TEXT_CONSUMABLE_PICKS = "Consumables to Remind"
+local TEXT_RAID_PICKS = "Raid Buffs to Remind"
+local TEXT_PERSONAL_PICKS = "Personal Buffs to Remind"
+local TEXT_THORNS_TANK = "Thorns Only on Tank"
+local TEXT_TYPED = "Your Spell"
+local TEXT_REMOVE = "Remove"
+local TEXT_UNKNOWN = ns.L("Unknown spell")
+local MAX_TYPED = 8
+
+local PERSONAL, ALL_PERSONAL = {}, {}
+local _, playerClass = UnitClass("player")
+for _, family in ipairs(D.PERSONAL) do
+    if family.class == playerClass then PERSONAL[#PERSONAL + 1] = family end
+end
+for _, family in ipairs(PERSONAL) do ALL_PERSONAL[#ALL_PERSONAL + 1] = family end
+for _, family in ipairs(D.PERSONAL) do
+    if family.class ~= playerClass then ALL_PERSONAL[#ALL_PERSONAL + 1] = family end
+end
+
+local Enabled = A.Enabled
+local RaidBuffsOn = A.Needs("raidBuffs")
+local PersonalBuffsOn = A.Needs("personalBuffs")
+local WeaponOn = A.Needs("weaponEnhancements")
+
+local function RangeOn()
+    return RaidBuffsOn() and S.Get("raidBuffRange") and true or false
+end
+
+local function ShownIn(kind, state)
+    return R.ShowsHere(kind, state == "raid" and "raid" or "none")
+end
+
+local function NewPreview(stage)
+    local shot = CreateFrame("Frame", nil, stage)
+    shot:SetAllPoints()
+    shot.row = CreateFrame("Frame", nil, shot)
+    shot.cells = {}
+    for i = 1, #PREVIEW do shot.cells[i] = Cell.New(shot.row) end
+    shot.personal = Cell.New(shot.row)
+    shot.bag = Cell.New(shot.row)
+    shot.note = ns.Font(shot, NOTE_SIZE, nil, T.muted)
+    shot.note:SetPoint("BOTTOM", 0, NOTE_Y)
+    return shot
+end
+
+local function Fit(shot)
+    local row = shot.row
+    local w, h = row:GetWidth(), row:GetHeight()
+    local roomW = shot:GetWidth() - STAGE_MARGIN * 2
+    local roomH = shot:GetHeight() - STAGE_MARGIN * 2 - NOTE_Y * 2
+    local scale = 1
+    if roomW > 0 and w > roomW then scale = roomW / w end
+    if roomH > 0 and h > 0 and h * scale > roomH then scale = roomH / h end
+    row:SetScale(scale)
+    row:ClearAllPoints()
+    row:SetPoint("CENTER", shot, "CENTER", 0, NOTE_Y / scale)
+end
+
+local function PersonalSample()
+    if not S.Get("personalBuffs") then return nil end
+    for _, family in ipairs(PERSONAL) do
+        if R.PersonalPicked(family) then return family.spells[1] end
+    end
+end
+
+local function PaintPreview(shot, state)
+    local size = S.Get("iconSize")
+    local consumables = state ~= "resting" and ShownIn("consumables", state)
+    local raid = ShownIn("raidBuffs", state) and R.RaidSample()
+    local personal = state ~= "resting" and ShownIn("personalBuffs", state) and PersonalSample()
+    local bag = state == "world" and S.Get("sleepingBag")
+    local n = 0
+    local function Put(cell, icon, count)
+        n = n + 1
+        Cell.Place(cell, shot.row, n, size, icon, count)
+    end
+    for i = 1, RAID_SAMPLE - 1 do
+        local p = PREVIEW[i]
+        local on = consumables and R.ConsumablePicked(p.kind)
+        if on then Put(shot.cells[i], p.item and C_Item.GetItemIconByID(p.item) or C_Spell.GetSpellTexture(p.spell), p.count) end
+        shot.cells[i]:SetShown(on)
+    end
+    if bag then Put(shot.bag, C_Item.GetItemIconByID(SLEEPING_BAG)) end
+    shot.bag:SetShown(bag and true or false)
+    if personal then Put(shot.personal, C_Spell.GetSpellTexture(personal)) end
+    shot.personal:SetShown(personal and true or false)
+    local raidCell = shot.cells[RAID_SAMPLE]
+    if raid then
+        local count = PREVIEW[RAID_SAMPLE].count
+        Put(raidCell, C_Spell.GetSpellTexture(raid), S.Get("raidBuffRange") and ("1/" .. count) or count)
+    end
+    raidCell:SetShown(raid and true or false)
+    Cell.Fit(shot.row, n, size)
+    Fit(shot)
+    shot.note:SetText(n == 0 and TEXT_NOTHING or "")
+end
+
+local function Summary(store)
+    local parts = {}
+    if store.Get("raidBuffs") then parts[#parts + 1] = ns.L("raid buffs") end
+    if store.Get("personalBuffs") and #PERSONAL > 0 then parts[#parts + 1] = ns.L("personal buffs") end
+    if store.Get("sleepingBag") then parts[#parts + 1] = ns.L("Sleeping Bag") end
+    return #parts > 0 and table.concat(parts, ", ") or nil
+end
+
+local function ClassRow(row, family)
+    local color = RAID_CLASS_COLORS[family.class]
+    row.labelColor = family.class == playerClass and color or T.muted
+    row.note = function()
+        return color:WrapTextInColorCode(LOCALIZED_CLASS_NAMES_MALE[family.class] or family.class)
+    end
+    return row
+end
+
+local function PickRow(family)
+    return { key = "raidBuffPicks", field = family.key, label = family.name, toggle = true,
+        needs = RaidBuffsOn, why = NEEDS_RAID,
+        help = family.class == "PALADIN" and TEXT_BLESSINGS or nil,
+        get = function() return R.Picked(family) end,
+        set = function(on)
+            local picks = {}
+            for k, v in pairs(S.Get("raidBuffPicks")) do picks[k] = v end
+            picks[family.key] = on
+            S.Set("raidBuffPicks", picks)
+        end }
+end
+
+local function ConsumableRow(category)
+    return { key = "consumablePicks", field = category, label = A.CATEGORY_NAMES[category], toggle = true,
+        needs = Enabled, why = OFF, help = TEXT_PICK,
+        get = function() return R.ConsumablePicked(category) end,
+        set = function(on)
+            local picks = {}
+            for k, v in pairs(S.Get("consumablePicks")) do picks[k] = v end
+            picks[category] = on
+            S.Set("consumablePicks", picks)
+        end }
+end
+
+local function CarriedRow(category, label, needs, why)
+    return { key = "carriedPicks", field = category, label = label, toggle = true, needs = needs, why = why,
+        help = TEXT_CARRIED,
+        get = function() return R.Carried(category) end,
+        set = function(on)
+            local picks = {}
+            for k, v in pairs(S.Get("carriedPicks")) do picks[k] = v end
+            picks[category] = on
+            S.Set("carriedPicks", picks)
+        end }
+end
+
+local function PersonalRow(family)
+    return ClassRow({ key = "personalBuffPicks", field = family.key, label = family.name, toggle = true,
+        needs = PersonalBuffsOn, why = NEEDS_PERSONAL, help = family.help,
+        get = function() return R.PersonalPicked(family) end,
+        set = function(on)
+            local picks = {}
+            for k, v in pairs(S.Get("personalBuffPicks")) do picks[k] = v end
+            picks[family.key] = on
+            S.Set("personalBuffPicks", picks)
+        end }, family)
+end
+
+local function TankRow(family)
+    return ClassRow({ key = "thornsTankOnly", label = TEXT_THORNS_TANK, toggle = true,
+        needs = function() return PersonalBuffsOn() and R.PersonalPicked(family) end, why = NEEDS_THORNS,
+        help = "Reminds you to put Thorns on your group's tank, or on yourself while solo." }, family)
+end
+
+local function TypedSpell(i)
+    local family = R.CustomBuffs()[i]
+    return family and family.spells[1]
+end
+
+local function TypedRow(i)
+    return { label = TEXT_TYPED, buttonText = TEXT_REMOVE, needs = PersonalBuffsOn, why = NEEDS_PERSONAL,
+        help = "Stops reminding you of this spell.",
+        hidden = function() return TypedSpell(i) == nil end,
+        note = function()
+            local id = TypedSpell(i)
+            return id and ((C_Spell.GetSpellName(id) or TEXT_UNKNOWN) .. " (" .. id .. ")") or ""
+        end,
+        button = function()
+            local keep = {}
+            for n, family in ipairs(R.CustomBuffs()) do
+                if n ~= i then keep[#keep + 1] = family.spells[1] end
+            end
+            S.Set("personalBuffExtra", table.concat(keep, ", "))
+        end }
+end
+
+local rows = {
+    Group("Consumables"),
+    { key = "consumablesWorld", label = "Show in the World", toggle = true, needs = Enabled, why = OFF },
+    { key = "consumablesDungeon", label = "Show in Dungeons", toggle = true, needs = Enabled, why = OFF },
+    { key = "consumablesRaid", label = "Show in Raids", toggle = true, needs = Enabled, why = OFF },
+    { key = "consumablesMaxHide", label = TEXT_AT_60, toggle = true, needs = Enabled, why = OFF,
+      help = "At level 60, consumable reminders stay out of the open world." },
+    { key = "consumablesMinutes", label = "Warn With Minutes Left", slider = MINUTES_RANGE, unit = " min",
+      needs = Enabled, why = OFF,
+      help = "A consumable or personal buff with less time than this left counts as missing." },
+    { key = "weaponEnhancements", label = "Weapon Enhancement Reminder", toggle = true, needs = Enabled, why = OFF,
+      help = "A reminder when a weapon has no sharpening stone, weightstone or oil on it." },
+    { key = "otherBuffs", label = "Other Buffs Reminder", toggle = true, needs = Enabled, why = OFF,
+      help = "Dire Maul drinks, Jujus, Zanza and Blasted Lands items you carry, when their buff is missing." },
+    { key = "leftClickMainHand", label = "Left-Click Main Hand", toggle = true, needs = Enabled, why = OFF,
+      help = "Left-click puts a poison, stone or oil on your main hand, right-click on your off hand." },
+    { key = "sleepingBag", label = "Sleeping Bag Reminder", toggle = true, needs = Enabled, why = OFF,
+      help = "Your Cozy Sleeping Bag out in the world, when it is ready and Well-Rested is missing." },
+    { key = "elementalAttractor", label = "Elemental Attractor Reminder", toggle = true, needs = Enabled, why = OFF,
+      help = "Your Elemental Attractor in the world and dungeons, when Magical Awareness is missing." },
+    { key = "hideResting", label = "Hide While Resting", toggle = true, needs = Enabled, why = OFF,
+      help = "No consumable or personal buff reminders in cities and inns." },
+    Group(TEXT_CONSUMABLE_PICKS),
+}
+for _, category in ipairs(A.CATEGORY_ORDER) do rows[#rows + 1] = ConsumableRow(category) end
+rows[#rows + 1] = Group("Only If I Carry One")
+for _, category in ipairs(A.CATEGORY_ORDER) do
+    if not D.DEFAULT_GROUPS[category].carried then
+        rows[#rows + 1] = CarriedRow(category, A.CATEGORY_NAMES[category], Enabled, OFF)
+    end
+end
+rows[#rows + 1] = CarriedRow("weapon", TEXT_WEAPON, WeaponOn, NEEDS_WEAPON)
+rows[#rows + 1] = Group("Raid Buffs", true)
+rows[#rows + 1] = { key = "raidBuffs", label = "Raid Buff Reminders", toggle = true, needs = Enabled, why = OFF,
+    help = "Missing class buffs in your group, out of combat, with how many are missing them. A camp "
+        .. "buff standing in for one, the Incense Candle for Arcane Intellect for example, is not seen, "
+        .. "so it still counts as missing." }
+rows[#rows + 1] = { key = "raidBuffsWorld", label = "Show in the World", toggle = true, needs = RaidBuffsOn,
+    why = NEEDS_RAID }
+rows[#rows + 1] = { key = "raidBuffsDungeon", label = "Show in Dungeons", toggle = true, needs = RaidBuffsOn,
+    why = NEEDS_RAID }
+rows[#rows + 1] = { key = "raidBuffsRaid", label = "Show in Raids", toggle = true, needs = RaidBuffsOn,
+    why = NEEDS_RAID }
+rows[#rows + 1] = { key = "raidBuffsMaxHide", label = TEXT_AT_60, toggle = true, needs = RaidBuffsOn,
+    why = NEEDS_RAID, help = "At level 60, raid buff reminders stay out of the open world." }
+rows[#rows + 1] = { key = "raidBuffsOwn", label = "Only Buffs I Can Cast", toggle = true, needs = RaidBuffsOn,
+    why = NEEDS_RAID, help = "Off: every buff a class in your group can cast." }
+rows[#rows + 1] = { key = "raidBuffRange", label = "Show Buff Range", toggle = true, needs = RaidBuffsOn,
+    why = NEEDS_RAID, help = "Shows how many missing buffs are in casting range and dims icons with none confirmed." }
+rows[#rows + 1] = { key = "raidBuffRangeHide", label = "Hide Out of Range", toggle = true, needs = RangeOn,
+    why = NEEDS_RANGE, help = "Hides a raid buff until someone missing it is in casting range." }
+rows[#rows + 1] = Group(TEXT_RAID_PICKS, true)
+for _, family in ipairs(D.RAID) do rows[#rows + 1] = PickRow(family) end
+rows[#rows + 1] = { key = "hideBlessingsOnPaladin", label = "Hide Blessings on Paladins", toggle = true,
+    needs = RaidBuffsOn, why = NEEDS_RAID, hidden = function() return playerClass ~= "PALADIN" end,
+    help = "Hides blessing reminders while your paladin is grouped; use the Blessings tab instead." }
+rows[#rows + 1] = Group("Personal Buffs", true)
+rows[#rows + 1] = { key = "personalBuffs", label = "Personal Buff Reminders", toggle = true, needs = Enabled,
+    why = OFF, help = "Your class buffs when they are missing or about to run out." }
+rows[#rows + 1] = { key = "personalBuffsWorld", label = "Show in the World", toggle = true, needs = PersonalBuffsOn,
+    why = NEEDS_PERSONAL }
+rows[#rows + 1] = { key = "personalBuffsDungeon", label = "Show in Dungeons", toggle = true, needs = PersonalBuffsOn,
+    why = NEEDS_PERSONAL }
+rows[#rows + 1] = { key = "personalBuffsRaid", label = "Show in Raids", toggle = true, needs = PersonalBuffsOn,
+    why = NEEDS_PERSONAL }
+rows[#rows + 1] = { key = "personalBuffsMaxHide", label = TEXT_AT_60, toggle = true, needs = PersonalBuffsOn,
+    why = NEEDS_PERSONAL, help = "At level 60, personal buff reminders stay out of the open world." }
+rows[#rows + 1] = { key = "personalBuffsSeconds", label = "Warn With Seconds Left", slider = SECONDS_RANGE, unit = " s",
+    needs = PersonalBuffsOn, why = NEEDS_PERSONAL,
+    help = "How early your class buffs remind you; follows Warn With Minutes Left until you set it.",
+    get = R.PersonalWarn,
+    set = function(v) S.Set("personalBuffsSeconds", v) end }
+rows[#rows + 1] = { key = "battleShoutSeconds", label = "Battle Shout Seconds Left", slider = SECONDS_RANGE, unit = " s",
+    needs = PersonalBuffsOn, why = NEEDS_PERSONAL, hidden = function() return playerClass ~= "WARRIOR" end,
+    help = "How early Battle Shout reminds you; follows Warn With Seconds Left until you set it.",
+    get = function() return S.Get("battleShoutSeconds") or R.PersonalWarn() end,
+    set = function(v) S.Set("battleShoutSeconds", v) end }
+rows[#rows + 1] = Group(TEXT_PERSONAL_PICKS, true)
+for _, family in ipairs(ALL_PERSONAL) do
+    rows[#rows + 1] = PersonalRow(family)
+    if family.key == "thorns" then rows[#rows + 1] = TankRow(family) end
+end
+rows[#rows + 1] = { key = "personalBuffExtra", label = "Spell IDs", text = true, wide = true,
+    needs = PersonalBuffsOn, why = NEEDS_PERSONAL,
+    help = "Your own buffs to remind you of, by the ID of the spell you cast, separated by spaces or commas." }
+for i = 1, MAX_TYPED do rows[#rows + 1] = TypedRow(i) end
+rows[#rows + 1] = Group("Glow")
+rows[#rows + 1] = { key = "buffGlow", label = "Glow", toggle = true, needs = Enabled, why = OFF,
+    help = "A glow around each reminder icon, since each is a buff that is missing or running out." }
+rows[#rows + 1] = A.GlowRows("buffGlow")
+rows[#rows + 1] = Group("Size")
+rows[#rows + 1] = { key = "iconSize", label = "Icon Size", slider = ICON_RANGE, needs = Enabled, why = OFF }
+rows[#rows + 1] = { key = "buffIconMode", label = "Icon", choice = ICON_MODES, needs = Enabled, why = OFF,
+    help = "Default: the item you carry, or the kind's usual icon. Last Used: the icon of the food, flask, "
+        .. "elixir, scroll or weapon item you used last." }
+rows[#rows + 1] = { key = "buffsBorderColor", label = "Border Color", colour = true, needs = Enabled, why = OFF,
+    get = function()
+        local c = Cell.EdgeColor()
+        return c.r, c.g, c.b, 1
+    end,
+    set = function(r, g, b) S.Set("buffsBorderColor", { r = r, g = g, b = b }) end,
+    help = "Follows your theme until you pick one." }
+rows[#rows + 1] = Settings.Look("buffs", { text = true, size = TEXT_RANGE, needs = Enabled, why = OFF })
+
+if A.OLD_COPY then return end
+
+Settings.Page(A.PAGE, S):Card({
+    id = "buffs", name = "Buffs & Consumables", order = ORDER_BUFFS,
+    help = "A row of icons for missing food, flask, elixir and scroll buffs, your own class buff, and class "
+        .. "buffs missing in your group. Out of combat only: the game keeps your buffs from addons in combat, so the "
+        .. "icons keep what they showed. Hover one to pick a carried item to use. Move them in the HUD Editor.",
+    summary = Summary,
+    studio = { height = STAGE_H, states = STATES, new = NewPreview, paint = PaintPreview },
+    rows = rows,
+})
