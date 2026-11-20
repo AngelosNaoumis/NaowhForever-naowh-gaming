@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 1.4.3
+
+### Changed
+- Options: the settings window has its GitHub button again.
 
 ### Fixed
 - Market: gear is priced to the copper, so Sell can match a listing like 2s 55c instead of dropping
