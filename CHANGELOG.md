@@ -1,9 +1,27 @@
 # Changelog
 
-## Unreleased
+## 1.4.5
+
+### Added
+- Gear & Trinkets: right-click a Trinket Bar slot in combat to pick what it takes next; it goes on
+  the moment combat ends, and its icon shows in the slot's corner until then.
+- Buff Reminders: the Other Buffs Reminder now includes Dragonbreath Chili you carry.
+- Buff Reminders: Profession Cooldown Reminders (off by default) for Transmute: Arcanite, Salt
+  Shaker, Mooncloth and Dedicated Study, with Remind With Hours Left and your other characters'
+  cooldowns. Turn it on under Buffs & Consumables > Profession Cooldowns.
+
+### Changed
+- Journey Card: changing Growth Direction now replays the card's steps, so you can see which edge
+  stays put.
 
 ### Fixed
 - Stealth Reminder: no more Lua errors on boss pulls when Show Cooldown is on.
+- Profiles: a new character is offered the profile of the character you played last, not an old beta
+  or stress test character's.
+- Blessings: Greater Blessings are offered again for paladins with the Reagent Economy Legacy talent
+  who carry no Symbols of Kings.
+- BiS List: Sorcerer's, Darkmantle, Beastmaster's and Feralheart gloves, boots and bracers that
+  Forever renamed, such as Sorcerer's Gauntlets, now count as yours.
 
 ## 1.4.4
 
