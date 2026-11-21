@@ -1,5 +1,7 @@
 # Changelog
 
+## Unreleased
+
 ## 1.4.5
 
 ### Added
