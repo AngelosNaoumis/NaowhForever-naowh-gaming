@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## 1.4.6
+
+### Added
+- Professions: Highest Profit in the recipe list's Filter > Sort lists all your recipes in one list,
+  the most profitable first (needs Crafting Profit, Profit in Recipe List and a price scan).
+- Smart Macros > Food Macro: Well Fed First makes NF Food use food that gives Well Fed before
+  higher-level food without a buff.
+- Loot Feed Count Size, to make the number on each icon bigger or smaller without changing the item
+  names.
 
 ### Changed
 - Dungeon Journal: boss loot updated from the latest Forever loot lists.
@@ -9,6 +17,14 @@
 ### Fixed
 - Professions: a macro that clicks Create on an Enchanting recipe now enchants the item you chose
   in the Naowh window, so one-button levelling macros work with the window on.
+- BiS List: items from an imported list show where they come from, such as Magician's Cord from Pix
+  Xizzix, and an item with no known source says so instead of World drop.
+- RestedXP: the Naowh window shows again with RestedXP 4.11.38.
+- Professions: with TradeSkillMaster loaded, a TSM button on the window's title bar switches to
+  TSM's crafting window, and TSM's Default UI button switches back.
+- BiS List: Auto lists no longer pick trinkets from the other faction's quests.
+- Professions: a recipe that makes several items per craft shows the whole craft's profit in the
+  recipe list, as the Profitable filter already counted it.
 
 ## 1.4.5
 
