@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+- Dungeon Journal: boss loot updated from the latest Forever loot lists.
+- BiS List: picks updated from wowsrc.com's latest lists.
+
 ## 1.4.5
 
 ### Added
