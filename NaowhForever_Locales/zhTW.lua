@@ -10587,3 +10587,4 @@ L["Also reminds you of your other characters' cooldowns, as they were when last 
 L["Needs Profession Cooldown Reminders"] = "需要專業技能冷卻提醒"
 L["%s is ready on %s."] = "%2$s 的%1$s已就緒。"
 L["%s is ready on %s in %s."] = "%2$s 的%1$s將在 %3$s 後就緒。"
+L["Highest Profit"] = "利潤最高"

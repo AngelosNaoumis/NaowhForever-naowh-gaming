@@ -10585,3 +10585,4 @@ L["Also reminds you of your other characters' cooldowns, as they were when last 
 L["Needs Profession Cooldown Reminders"] = "Requer Lembretes de recargas de profissão"
 L["%s is ready on %s."] = "%s de %s está disponível."
 L["%s is ready on %s in %s."] = "%s de %s estará disponível daqui a %s."
+L["Highest Profit"] = "Maior lucro"

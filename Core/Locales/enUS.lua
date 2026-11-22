@@ -9043,3 +9043,4 @@ L["Also reminds you of your other characters' cooldowns, as they were when last 
 L["Needs Profession Cooldown Reminders"] = true
 L["%s is ready on %s."] = true
 L["%s is ready on %s in %s."] = true
+L["Highest Profit"] = true

@@ -10585,3 +10585,4 @@ L["Also reminds you of your other characters' cooldowns, as they were when last 
 L["Needs Profession Cooldown Reminders"] = "전문 기술 재사용 대기시간 알림 필요"
 L["%s is ready on %s."] = "%2$s의 %1$s 준비 완료."
 L["%s is ready on %s in %s."] = "%2$s의 %1$s, %3$s 후 준비."
+L["Highest Profit"] = "이익 높은 순"
