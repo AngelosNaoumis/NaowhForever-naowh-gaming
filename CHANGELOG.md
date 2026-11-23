@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Changed
+- Dungeon Journal: boss loot updated from the latest Forever loot lists.
+
 ## 1.4.6
 
 ### Added
