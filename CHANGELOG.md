@@ -1,12 +1,23 @@
 # Changelog
 
-## Unreleased
+## 1.4.7
+
+### Added
+- Gear & Trinkets: the Trinket Bar's right-click picker shows each trinket's cooldown, and a new
+  Picker Side option sets which side of the slot it opens on.
 
 ### Changed
 - Dungeon Journal: boss loot updated from the latest Forever loot lists.
 
 ### Fixed
 - Badges: no more Lua errors when hovering a patron's unit frame while the tooltip is restricted.
+- Buffs & Consumables: Weapon Imbue, Poisons and the weapon stone reminder no longer ask for an
+  enchant on a fishing pole.
+- Journeys: no more Lua errors when combat starts while a route is being worked out.
+- XP Bar: rested experience starts after your quest XP instead of underneath it, so its full length
+  shows.
+- Dungeon Journal: Forever's own dungeon quests, like Magics of the Drowned City, now show the
+  quests to finish before you can pick them up.
 
 ## 1.4.6
 
