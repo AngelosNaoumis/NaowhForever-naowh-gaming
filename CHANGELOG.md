@@ -1,17 +1,45 @@
 # Changelog
 
-## Unreleased
+## 1.4.8
 
 ### Added
 - The Market: the Ledger's Sales, Purchases, Other and Failed lists have a Type filter beside the name
   filter, so you can list only auction sales, only vendor sales, only repairs and so on. Each list
   remembers its own.
+- Campfire: the Sleeping Bag now shows beside the Simple bar too, just past its right end.
+- Waypoint Pin: a skip button on the navigator moves a route on to its next stop.
+- Training Planner: Talent Overlay (off by default) lights the next talent of a build on your talent
+  window, with a panel to pick the build.
+- Loot Rolls: a small window of the group's loot rolls, showing who picked Need, Greed or Pass,
+  their roll and the winner; click an item for everyone's roll. Turn it on in Bags, Loot & Mail >
+  Loot.
+
+### Changed
+- Dungeon Journal: a quest both factions take from different givers shows only your faction's giver,
+  with a waypoint (Tome of Twilight in Krol'dok Stronghold).
+- BiS List and Stat Weights: hit counts only up to the hit cap (8% attacks, 17% spells, 27% with two
+  weapons), and your talents' hit is counted first, in upgrade percents and on the Gear Score card.
 
 ### Fixed
 - Campfire: on the Simple style, the Camp Nearby alert now pops up in the middle of the screen when
   your Camp Benefits is gone and a campfire is in range, as it does on Round.
 - Professions: searching the recipe list by a reagent's name now finds unlearned recipes too, so
   "red" shows Hot Wolf Ribs.
+- Professions: the window no longer snaps back after a drag with BlizzMove or MoveAny.
+- Dungeon Journal: opening the world map inside a dungeon no longer draws the Journal page beside it
+  twice, which caused a short freeze.
+- Gear Reminders: the Argent Dawn Commission reminder also works with Seal of the Dawn and Rune of
+  the Dawn.
+- Badges: no more Lua error when hovering Naowh's badge on the character panel.
+- Stat Weights: each character keeps its own Your Spec pick instead of sharing one across
+  characters.
+- The Market: Farm's Start Loop moves on to the next stop when you get within 15 yards of one or
+  gather a node near it, instead of staying on the first.
+- Dungeon Journal: dungeons with many floors (like Scholomance) show every floor number on the map's
+  floor tabs instead of "..".
+- RestedXP: the Naowh window works with RestedXP 4.11.39.
+- The Market: after hiding the UI at the auction house (Alt+Z), the Farm page no longer opens with
+  the Sell page drawn under it.
 
 ## 1.4.7
 
