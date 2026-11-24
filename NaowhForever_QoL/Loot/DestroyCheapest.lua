@@ -138,6 +138,10 @@ function D.Opened()
     return D.popup and D.popup:IsShown()
 end
 
+function D.RankQty()
+    return S.Get("destroyCheapestRankQty") == "unit" and "unit" or "batch"
+end
+
 function D.EnsureMarket(e)
     if type(e) ~= "table" or e.marketChecked or not e.itemID then return end
     e.marketChecked = true

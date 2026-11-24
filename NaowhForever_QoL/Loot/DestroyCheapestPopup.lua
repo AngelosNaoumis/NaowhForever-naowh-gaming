@@ -788,7 +788,7 @@ local function SettingChanged(key)
         Apply()
         return
     end
-    if not D.pending and (key == "destroyCheapestMarketRank"
+    if not D.pending and (key == "destroyCheapestMarketRank" or key == "destroyCheapestRankQty"
         or key == "destroyCheapestMarketStale" or key == "destroyCheapestMarketDays") then
         D.index = 0
     end
@@ -980,6 +980,10 @@ local SIDES = {
     { top = "Top", right = "Right", bottom = "Bottom", left = "Left" },
     { "top", "right", "bottom", "left" },
 }
+local RANK_QTY = {
+    { batch = "Batch (stack)", unit = "Individual (unit)" },
+    { "batch", "unit" },
+}
 
 Settings.Page("QoL/Loot & Items", S):Card({
     id = "destroyCheapest", name = "Destroy Cheapest Item", order = 62, switch = "destroyCheapest",
@@ -1004,6 +1008,10 @@ Settings.Page("QoL/Loot & Items", S):Card({
           help = "Offers heirloom items." },
         { key = "destroyCheapestConsumable", label = "Consumables", toggle = true,
           help = "Also offers consumables a vendor will not buy. Ones with a vendor price are offered anyway." },
+        { key = "destroyCheapestZeroVendor", label = "Include Zero-Vendor-Value Items", toggle = true,
+          help = "Also offers other items a vendor pays nothing for." },
+        { key = "destroyCheapestBoundGear", label = "Include Bound Armor and Weapons", toggle = true,
+          help = "Also offers soulbound armor and weapons." },
         { key = "destroyCheapestAll", label = "All Items", toggle = true,
           help = "Offers every quality and zero-vendor item, but keeps protected and ignored items." },
         Settings.Group("Popup"),
@@ -1016,10 +1024,14 @@ Settings.Page("QoL/Loot & Items", S):Card({
         { label = "Reset Position", button = ResetPosition, buttonText = "Reset", always = true,
           help = "Clears a dragged place and uses Beside the Loot Window again." },
         Settings.Group("Prices"),
+        { key = "destroyCheapestDurability", label = "Estimate Worn Vendor Price", toggle = true,
+          help = "Lowers damaged gear's vendor price by its remaining durability." },
         { key = "destroyCheapestMarket", label = "Market Prices", toggle = true,
           help = "Shows the auction house price next to the vendor price when one is known." },
         { key = "destroyCheapestMarketRank", label = "Rank by Market Value", toggle = true,
           help = "Sorts by auction price times stack, cheapest first, and uses the vendor price when no auction price is known." },
+        { key = "destroyCheapestRankQty", label = "Rank Quantity", choice = RANK_QTY,
+          help = "Ranks by the whole stack or by one item." },
         { key = "destroyCheapestMarketStale", label = "Ignore Old Scans", toggle = true,
           help = "An auction price older than Older Than is left out, and the vendor price is used." },
         { key = "destroyCheapestMarketDays", label = "Older Than (days)", slider = D.STALE_RANGE,

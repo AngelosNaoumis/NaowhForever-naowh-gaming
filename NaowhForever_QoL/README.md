@@ -1145,6 +1145,12 @@ NaowhForever_QoL/
   sorted by, is above it. All Items skips that limit too. An item whose price is not
   loaded yet is asked for once and added when it arrives. Bag Space does not have to be on.
   Nothing is destroyed on its own.
+- Include Zero-Vendor-Value Items and Include Bound Armor and Weapons start off. Each lifts only
+  its named vendor or bound-gear rule; quest items, tools, set pieces, BiS items and the other
+  protections stay. Estimate Worn Vendor Price starts off and scales damaged armor and weapons by
+  their remaining durability, with the result labelled Vendor est. Rank Quantity keeps Batch
+  (stack) as its default and can rank by one item instead. Keep Items Worth More Than always checks
+  the whole stack, even when the list ranks individual items.
 - Every quality, including poor and common, asks for a second click on that same button. The
   first click prepares the delete and the button names that item ("Click again to destroy"
   plus its link). That confirmation is for that slot, item, stack size and link, against the loot
