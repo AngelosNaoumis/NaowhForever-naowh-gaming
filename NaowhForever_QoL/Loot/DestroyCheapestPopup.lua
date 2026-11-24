@@ -133,6 +133,10 @@ local function StepLoot(delta)
     if D.lootIndex < 1 then D.lootIndex = #D.loots end
     if D.lootIndex > #D.loots then D.lootIndex = 1 end
     D.armed = false
+    if S.Get("destroyCheapestReagentBag") then
+        D.Refresh()
+        return
+    end
     D.Paint()
 end
 
@@ -689,8 +693,8 @@ function D.Refresh()
         return
     end
     D.Listen(true)
-    D.Scan()
     D.ReadLoot()
+    D.Scan()
     D.FlushLoads()
     D.Paint()
 end
@@ -708,8 +712,8 @@ local function Show()
     D.Listen(true)
     if not was then Place() end
     popup:Show()
-    D.Scan()
     D.ReadLoot()
+    D.Scan()
     D.FlushLoads()
     D.Paint()
 end
@@ -758,6 +762,10 @@ local function OnEvent(_, event, a, b)
     if event == "LOOT_CLOSED" then return Settle(not D.LootShown()) end
     if D.pending or not D.Opened() then return end
     D.ReadLoot()
+    if S.Get("destroyCheapestReagentBag") then
+        D.Scan()
+        D.FlushLoads()
+    end
     D.Paint()
 end
 
@@ -1038,6 +1046,8 @@ Settings.Page("QoL/Loot & Items", S):Card({
           needs = "destroyCheapestMarketStale",
           help = "How many days an auction price can be before it is left out." },
         Settings.Group("Full Bags"),
+        { key = "destroyCheapestReagentBag", label = "Reagent Bag When Full", toggle = true,
+          help = "Also offers a reagent-bag reagent when incoming reagent loot cannot fit." },
         { key = "destroyCheapestTransfers", label = "Bank and Other Transfers", toggle = true,
           help = "Also opens when the bank, mail, a trade, a vendor or a quest reward will not fit." },
         Settings.Group("Ignore List"),

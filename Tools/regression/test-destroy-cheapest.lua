@@ -39,6 +39,9 @@ local ITEMS = {
     [37] = { "Gear Set Belt", 2, 50, CLASS.ARMOR, 0 },
     [38] = { "Quest Slot Rock", 1, 5, CLASS.TRADE, 0 },
     [40] = { "Worn Sword", 1, 100, CLASS.WEAPON, 1 },
+    [60] = { "Incoming Herb", 1, 20, CLASS.TRADE, 0, 0, nil, true },
+    [61] = { "Incoming Cloth", 1, 20, CLASS.TRADE, 0 },
+    [62] = { "Bag Herb", 1, 5, CLASS.TRADE, 0, 0, nil, true },
     [FISHING_POLE] = { "Fishing Pole", 1, 5, CLASS.WEAPON, 20 },
     [HEARTHSTONE] = { "Hearthstone", 1, 0, CLASS.TRADE, 0 },
     [MINING_PICK] = { "Mining Pick", 1, 2, CLASS.WEAPON, 14 },
@@ -61,6 +64,7 @@ local function Fixture()
         destroyCheapestConsumable = true, destroyCheapestAll = false, bagCleanupMaxValue = 0,
         destroyCheapestRankQty = "batch", destroyCheapestZeroVendor = false,
         destroyCheapestBoundGear = false, destroyCheapestDurability = false,
+        destroyCheapestReagentBag = false,
     }
     local db = {}
     local S = {}
@@ -74,7 +78,7 @@ local function Fixture()
 
     -- bags[bag] = { n = slots, [slot] = { id, count, link, bound } }; family[bag] = bag family.
     t.bags, t.family, t.loot, t.quests, t.sets, t.bis, t.books = {}, {}, {}, {}, {}, {}, {}
-    t.durability = {}
+    t.durability, t.free = {}, {}
     local cursor
 
     local noop = function() end
@@ -151,7 +155,8 @@ local function Fixture()
     env.LOOT_SLOT_ITEM = 1
     env.ITEM_QUALITY_COLORS = {}
     for q = 0, 7 do env.ITEM_QUALITY_COLORS[q] = { r = 1, g = 1, b = 1 } end
-    env.Enum = { ItemWeaponSubclass = { Fishingpole = 20 }, ItemBind = { OnAcquire = BIND_ON_ACQUIRE, Quest = BIND_QUEST } }
+    env.Enum = { BagIndex = { ReagentBag = 5 }, ItemWeaponSubclass = { Fishingpole = 20 },
+        ItemBind = { OnAcquire = BIND_ON_ACQUIRE, Quest = BIND_QUEST } }
 
     local function Slot(bag, slot)
         local b = t.bags[bag]
@@ -163,7 +168,7 @@ local function Fixture()
     env.C_Container = {
         GetContainerItemInfo = Slot,
         GetContainerNumSlots = function(bag) return t.bags[bag] and t.bags[bag].n or 0 end,
-        GetContainerNumFreeSlots = function(bag) return 0, t.family[bag] or 0 end,
+        GetContainerNumFreeSlots = function(bag) return t.free[bag] or 0, t.family[bag] or 0 end,
         GetContainerItemQuestInfo = function(bag, slot)
             local s = t.bags[bag] and t.bags[bag][slot]
             return { isQuestItem = s and t.quests[s.id] or false }
@@ -192,7 +197,7 @@ local function Fixture()
         local vendor = t.linkVendor[query]
         if vendor == nil then vendor = row[3] end
         return row[1], "item:" .. id, row[2], 1, 1, "x", "y", 1, "", id, vendor, row[4], row[5],
-            row[6] or 0, 0, row[7]
+            row[6] or 0, 0, row[7], row[8]
     end
     env.C_Item = {
         GetItemInfo = Info,
@@ -545,6 +550,56 @@ do
     t.Open({ 10 })
     check(t.D.WorthIt(t.D.picks[1], t.D.loots[1]) == false,
         "an auction-valued zero-vendor item requires Destroy Anyway")
+end
+
+-- The reagent-bag option needs full ordinary and reagent bags plus incoming reagent loot.
+do
+    local t = Fixture()
+    t.Fill({ { 10 } })
+    t.bags[5] = { n = 2, [1] = { id = 62, count = 1 }, [2] = { id = 10, count = 1 } }
+    t.Open({ 60 })
+    check(t.Offered(62) == nil, "the reagent bag is not scanned while its option is off")
+    t.settings.destroyCheapestReagentBag = true
+    t.D.Refresh()
+    check(t.Offered(62) ~= nil, "a reagent-bag reagent is offered for incoming reagent loot")
+    check(t.Offered(10) ~= nil, "ordinary-bag candidates remain available beside the reagent offer")
+    check(t.D.picks[1].itemID == 62, "the reagent-bag candidate joins the same cheapest-first list")
+    t.free[5] = 1
+    t.D.Refresh()
+    check(t.Offered(62) == nil, "a free reagent-bag slot keeps its contents out of the list")
+    t.free[5] = 0
+    t.loot[1] = { id = 61, count = 1 }
+    t.Event("LOOT_SLOT_CLEARED")
+    check(t.Offered(62) == nil, "a class-7 non-reagent does not activate the reagent-bag offer")
+end
+
+-- The second click re-checks the reagent-bag conditions.
+do
+    local t = Fixture()
+    t.settings.destroyCheapestReagentBag = true
+    t.Fill({ { 10 } })
+    t.bags[5] = { n = 1, [1] = { id = 62, count = 1 } }
+    t.Open({ 60 })
+    check(t.D.picks[1].bag == 5, "the reagent-bag item is selected")
+    t.D.OnDestroy()
+    t.free[5] = 1
+    t.D.OnDestroy()
+    check(t.deleted == 0 and t.picked == 0, "a newly free reagent-bag slot cancels the delete")
+end
+
+-- Replacing the incoming reagent with ordinary loot cancels the arm and removes the offer.
+do
+    local t = Fixture()
+    t.settings.destroyCheapestReagentBag = true
+    t.Fill({ { 10 } })
+    t.bags[5] = { n = 1, [1] = { id = 62, count = 1 } }
+    t.Open({ 60 })
+    t.D.OnDestroy()
+    t.loot[1] = { id = 61, count = 1 }
+    t.Event("LOOT_SLOT_CLEARED")
+    check(not t.D.armed and t.Offered(62) == nil, "ordinary replacement loot cancels the reagent arm")
+    t.D.OnDestroy()
+    check(t.deleted == 0, "one click after the replacement never deletes")
 end
 
 -- The cards keep unit and stack prices separate, and the comparison uses each side's count.

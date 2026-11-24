@@ -160,6 +160,7 @@ local S = UI.ModuleSettings("qol", {
     destroyCheapestConsumable = true, destroyCheapestAll = false,
     destroyCheapestRankQty = "batch", destroyCheapestZeroVendor = false,
     destroyCheapestBoundGear = false, destroyCheapestDurability = false,
+    destroyCheapestReagentBag = false,
     bagSpace = F.bagSpace, bagSpaceCount = 4, bagSpaceSize = 36, bagSpaceGrow = "RIGHT", bagSpaceReverse = false,
     bagSpaceMaxQuality = 2, bagSpaceJunkFirst = false, bagSpaceAuction = true,
     bagSpaceProtect = true, bagSpaceFreeBelow = 0, bagSpaceHideCombat = true,

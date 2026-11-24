@@ -9,7 +9,6 @@ local GetItemInfoInstant = C_Item.GetItemInfoInstant
 local D = ns.DestroyCheapest
 local S = ns.QoLSettings
 
-local SELL = ns.QoLConstants.SELL_PRICE
 local FISHING = Enum.ItemWeaponSubclass.Fishingpole
 local BIND_ON_ACQUIRE = Enum.ItemBind.OnAcquire
 local BIND_QUEST = Enum.ItemBind.Quest
@@ -228,14 +227,16 @@ end
 
 local function ItemFacts(info, bag, slot)
     local query = info.hyperlink or info.itemID
-    local name, _, itemQuality, _, _, _, _, _, _, _, vendor, infoClass, infoSub, bindType, _, setID =
+    local name, _, itemQuality, _, _, _, _, _, _, _, vendor, infoClass, infoSub, bindType, _, setID,
+        isCraftingReagent =
         GetItemInfo(query)
     local _, _, _, _, _, classID, subclassID = GetItemInfoInstant(query)
     if type(classID) ~= "number" then classID = infoClass end
     if type(subclassID) ~= "number" then subclassID = infoSub end
     local estimated
     vendor, estimated = WornVendor(vendor, bag, slot, classID)
-    return name, ReadQuality(info.quality, itemQuality), vendor, classID, subclassID, bindType, setID, estimated
+    return name, ReadQuality(info.quality, itemQuality), vendor, classID, subclassID, bindType, setID,
+        estimated, isCraftingReagent == true
 end
 
 local function Queue(itemID)
@@ -271,7 +272,8 @@ function D.FlushLoads()
 end
 
 local function Offerable(bag, slot, info)
-    local name, quality, vendor, classID, subclassID, bindType, setID, estimated = ItemFacts(info, bag, slot)
+    local name, quality, vendor, classID, subclassID, bindType, setID, estimated, isCraftingReagent =
+        ItemFacts(info, bag, slot)
     local showAll = ShowAll()
     if name == nil or (quality == nil and not showAll) then return nil end
     if vendor == nil then
@@ -279,21 +281,22 @@ local function Offerable(bag, slot, info)
         vendor = 0
     end
     if Kept(bag, slot, info, quality, vendor, classID, subclassID, bindType, setID) then return false end
-    return true, name, quality, vendor, classID, estimated
+    return true, name, quality, vendor, classID, estimated, isCraftingReagent
 end
 
-local function ScanSlot(bag, slot)
+local function ScanSlot(bag, slot, reagentOnly)
     local info = GetContainerItemInfo(bag, slot)
     if not (info and info.itemID) or info.isLocked then return end
-    local offer, name, quality, vendor, classID, estimated = Offerable(bag, slot, info)
+    local offer, name, quality, vendor, classID, estimated, isCraftingReagent = Offerable(bag, slot, info)
     if offer == nil then return Queue(info.itemID) end
-    if not offer then return end
+    if not offer or (reagentOnly and not isCraftingReagent) then return end
     local e = Take()
     local count = info.stackCount or 1
     e.bag, e.slot, e.itemID = bag, slot, info.itemID
     e.link, e.icon, e.name = info.hyperlink, info.iconFileID, name
     e.count, e.quality, e.value = count, quality, vendor * count
     e.classID = classID
+    e.isCraftingReagent = isCraftingReagent
     e.vendor, e.vendorUnit, e.vendorKnown = vendor, vendor, true
     e.vendorEstimated = estimated == true
     e.vendorTotal = e.value
@@ -304,6 +307,14 @@ local function ScanSlot(bag, slot)
         return
     end
     D.picks[#D.picks + 1] = e
+end
+
+function D.OfferReagentBag()
+    if S.Get("destroyCheapestReagentBag") ~= true then return false end
+    local bag = D.ReagentBagIndex()
+    if GetContainerNumSlots(bag) <= 0 or D.ReagentFree() ~= 0 then return false end
+    local loot = D.loots[D.lootIndex]
+    return loot and loot.isCraftingReagent == true or false
 end
 
 function D.Scan()
@@ -320,11 +331,15 @@ function D.Scan()
     wipe(D.waitingInfo)
     ReadSets()
     local last = NUM_TOTAL_EQUIPPED_BAG_SLOTS or NUM_BAG_SLOTS
+    local reagentBag = D.ReagentBagIndex()
+    if reagentBag > last then last = reagentBag end
     local everyBag = ShowAll()
+    local offerReagent = D.OfferReagentBag()
     maxValue = MaxValue()
     for bag = BACKPACK_CONTAINER, last do
-        if everyBag or D.IsPlain(bag) then
-            for slot = 1, GetContainerNumSlots(bag) or 0 do ScanSlot(bag, slot) end
+        local reagentOnly = bag == reagentBag and offerReagent and not everyBag
+        if everyBag or D.IsPlain(bag) or reagentOnly then
+            for slot = 1, GetContainerNumSlots(bag) or 0 do ScanSlot(bag, slot, reagentOnly) end
         end
     end
     table.sort(D.picks, Cheaper)
@@ -374,13 +389,17 @@ function D.ReadLoot()
             local texture, name, qty, currencyID, quality, _, isQuest, questID, _, isCoin = GetLootSlotInfo(i)
             if texture and not isCoin and not currencyID then
                 local link = GetLootSlotLink(i)
-                local vendor = link and select(SELL, GetItemInfo(link))
+                local vendor, isCraftingReagent
+                if link then
+                    _, _, _, _, _, _, _, _, _, _, vendor, _, _, _, _, _, isCraftingReagent = GetItemInfo(link)
+                end
                 if link and vendor == nil then Queue(GetItemInfoInstant(link)) end
                 local e = LootTake()
                 e.slot, e.link, e.icon, e.name = i, link, texture, name
                 e.itemID = link and GetItemInfoInstant(link) or nil
                 e.count, e.quality = qty or 1, quality
                 e.quest = (isQuest or questID) and true or false
+                e.isCraftingReagent = isCraftingReagent == true
                 e.vendor = vendor
                 e.vendorUnit, e.vendorKnown, e.vendorEstimated = vendor, vendor ~= nil, nil
                 e.vendorTotal = vendor and vendor * e.count or nil
@@ -398,8 +417,12 @@ function D.Matches(pick)
     local info = GetContainerItemInfo(pick.bag, pick.slot)
     if not (info and info.itemID == pick.itemID) or info.isLocked then return false end
     if info.hyperlink ~= pick.link or (info.stackCount or 1) ~= pick.count then return false end
-    if not ShowAll() and not D.IsPlain(pick.bag) then return false end
-    local offer, _, _, vendor = Offerable(pick.bag, pick.slot, info)
+    local reagentPick = pick.bag == D.ReagentBagIndex()
+    if not ShowAll() and not D.IsPlain(pick.bag) then
+        if not reagentPick or not D.OfferReagentBag() then return false end
+    end
+    local offer, _, _, vendor, _, _, isCraftingReagent = Offerable(pick.bag, pick.slot, info)
+    if reagentPick and not ShowAll() and not isCraftingReagent then return false end
     if not offer or vendor * pick.count ~= pick.value then return false end
     local worth = pick.value
     if RankMarket() then

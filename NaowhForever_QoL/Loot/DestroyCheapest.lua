@@ -10,6 +10,7 @@ local D = {}
 ns.DestroyCheapest = D
 
 local PLAIN = ns.QoLConstants.PLAIN_BAG
+local REAGENT_BAG_INDEX = Enum.BagIndex and Enum.BagIndex.ReagentBag or 5
 local TRANSFER_FRAMES = {
     "BankFrame", "EUI_BankFrame", "MailFrame", "TradeFrame",
     "MerchantFrame", "GuildBankFrame", "QuestFrame",
@@ -80,8 +81,19 @@ function D.On()
 end
 
 function D.IsPlain(bag)
+    if bag == REAGENT_BAG_INDEX then return false end
     local _, family = GetContainerNumFreeSlots(bag)
     return family == nil or family == PLAIN
+end
+
+function D.ReagentBagIndex()
+    return REAGENT_BAG_INDEX
+end
+
+function D.ReagentFree()
+    local free = GetContainerNumFreeSlots(REAGENT_BAG_INDEX)
+    if type(free) ~= "number" then return end
+    return free
 end
 
 function D.PlainFree()

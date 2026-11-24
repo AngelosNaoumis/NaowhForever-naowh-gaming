@@ -1151,6 +1151,11 @@ NaowhForever_QoL/
   their remaining durability, with the result labelled Vendor est. Rank Quantity keeps Batch
   (stack) as its default and can rank by one item instead. Keep Items Worth More Than always checks
   the whole stack, even when the list ranks individual items.
+- Reagent Bag When Full starts off. When both the ordinary bags and reagent bag are full, and the
+  selected incoming item is marked `isCraftingReagent` by `C_Item.GetItemInfo`, it adds eligible
+  reagents from the reagent bag to the same cheapest-first list. A free reagent-bag slot, ordinary
+  incoming loot or paging to a non-reagent removes those offers. The second click checks those
+  conditions again before picking up the item.
 - Every quality, including poor and common, asks for a second click on that same button. The
   first click prepares the delete and the button names that item ("Click again to destroy"
   plus its link). That confirmation is for that slot, item, stack size and link, against the loot
