@@ -1,6 +1,37 @@
 # Changelog
 
-## Unreleased
+## 1.4.9
+
+### Added
+- The Market: when you buy part of a listing, the "Buy how many?" box shows the total cost and the
+  price each as you type, and lights the listings that amount buys from.
+- Map Pins: Town Pins on Minimap pins the town NPCs you picked on the map (repairs, inns, trainers)
+  near you on the minimap.
+- The Market: Buy > Searches: right-click a recent search to delete it, or pick Clear Recent from
+  the list menu to empty Recent.
+- Top Bar: Find can be added as a button, and has its own minimap button under Minimap Icons (off by
+  default).
+- Watch List: a small window of the reputations, currencies and items you pick to watch (Leveling &
+  Training > Experience).
+- Buffs & Consumables: Firestone and Spellstone reminders for warlocks (off by default, under
+  Personal Buffs to Remind). A click puts the stone on your main hand, or creates one when you carry
+  none.
+- Buffs & Consumables: a Righteous Fury reminder for paladins (off by default, under Personal Buffs
+  to Remind). It shows only with Improved Righteous Fury learned or while you are your group's tank.
+
+### Changed
+- Quest List: Hide Done now also hides the finished steps of a quest chain you are still on.
+
+### Fixed
+- Journeys: journeys into Ironforge go through the Deeprun Tram instead of placing a plain waypoint
+  with "No way found".
+- Map Pins: Riverglades' towns (Krol'dok Stronghold, the Alliance town and the goblin port) show
+  their vendors, trainers, inns, banks and stable masters.
+- Professions: nine camp blueprints, Spinning Wheel among them, show the dungeon boss that drops
+  them instead of a vendor that does not sell them.
+- Flight Point Reminder: no longer asks you to learn a flight point you already have after you open
+  a flight map somewhere else.
+- Professions: the window reopens where you left it, so you no longer scroll back down each time.
 
 ## 1.4.8
 
