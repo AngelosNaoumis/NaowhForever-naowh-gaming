@@ -1130,20 +1130,28 @@ NaowhForever_QoL/
   on, and anything on this feature's ignore list. Bags, consumables, reagents, trade goods,
   miscellaneous items and unbound gear are offered when their quality is on and they have a
   vendor price. Consumables
-  starts on and also offers ones a vendor will not buy. All Items starts off. While it is on,
-  every item in your bags is offered except ones on this ignore list. An item whose price is not
+  starts on and also offers ones a vendor will not buy. All Items starts off. While it is on, the
+  quality switches and the vendor-price rule are skipped and profession bags are scanned too. Every
+  other item left out above stays left out, and so does anything on this ignore list. Keep Items
+  Worth More Than, on the Bag Clean-up card, also keeps a stack whose value, the one the list is
+  sorted by, is above it. All Items skips that limit too. An item whose price is not
   loaded yet is asked for once and added when it arrives. Bag Space does not have to be on.
   Nothing is destroyed on its own.
 - Every quality, including poor and common, asks for a second click on that same button. The
   first click prepares the delete and the button names that item ("Click again to destroy"
-  plus its link). A different item, or moving to another one, clears that confirmation. The
+  plus its link). That confirmation is for that slot, item, stack size and link, against the loot
+  shown, on that button. A different item, paging either card, a stack or link that changed, or
+  the other button (Destroy Anyway after Destroy, or the reverse) clears it. The
   second click is the one the game accepts: on this
   client `DeleteCursorItem` only runs from that hardware click, and a later confirm button cannot
   run it. If the game still opens its own delete window, it is left for the player and never
   accepted or typed for here. If the delete does not take and no window is open, the item is put
   back in its slot, so it is not left on the cursor. The addon says it was destroyed only after a
-  bag update shows that stack gone and the count dropped by that stack. The slot is read again at
-  the click. If it changed, nothing is deleted.
+  bag update shows that stack gone and the count dropped by that stack. At the second click the
+  slot is read again with live settings: the item, its link and stack, a plain bag unless All
+  Items is on, every item left out above, the quality and vendor-price rules, the vendor price
+  shown, and Keep Items Worth More Than. If any of it changed, nothing is deleted and the list is
+  rebuilt.
 - After the stack is gone, the loot is taken only when its window is still open, the slot still
   has the item, and the player is out of combat. Otherwise the message says to loot it again. A
   bank, mail, trade, vendor or quest window says "Loot it again after making room." on the
