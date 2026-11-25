@@ -1,6 +1,80 @@
 # Changelog
 
-## Unreleased
+## 1.4.10
+
+### Added
+- Dungeon Journal: Entrances on the World Map shows each door of Dire Maul (East, its back door,
+  West, North), Stratholme (Main Gate, Service Entrance) and Uldaman (front and back), named on
+  hover.
+- Blessings: Shift-click a class button to cast the normal blessing instead of the Greater one, or
+  Shift-click a player in the player list to cast their Greater Blessing.
+- Dungeon Journal: dungeon quests warn you in red on their tooltip when something is easy to miss,
+  like a step done outside the dungeon, one to finish before the last boss, or a prerequisite that
+  needs a group (with Quest Help on).
+- The Market: Cheap Upgrades (Crafting & Market > The Market, off by default) adds an Upgrades view
+  to Buy: the gear in your scans that beats what you wear, at or under your price, biggest upgrade
+  first. A click finds it on the auction house.
+- QoL > Interface > Names & Badges: Names Over Heads can hide friendly and enemy pet, guardian and
+  totem names, and keeps your choice across logins.
+- Stat Weights: All Specs on Tooltips (BiS List > Settings > Stat Weights, off by default) shows the
+  upgrade line for each of your class's specs, yours first.
+- Buffs & Consumables: a Demonic Sacrifice reminder for warlocks (off by default, under Personal
+  Buffs to Remind). It shows while you have none of the sacrifice buffs, and a click sacrifices the
+  demon you have out.
+- Watch List: Lock Window and Progress Bars (reputations and capped currencies), on the Watch List
+  card.
+- Mail & Alts: the mailbox's Alts menu has "Add a character", for your characters on another WoW
+  account, such as a bank alt.
+- The Market: Ctrl + Shift + click an item on any Market page to add it to your Watch List, a step
+  under its scan price.
+- QoL > Questing & Group: Whisper Invite invites players who whisper you one of your words (inv and
+  invite to start, off by default), with a Friends and Guild Only option.
+- Blessings: All Auras, under Aura Button on the Blessing Bar card, shows a button for each aura you
+  know and lights the one that is up.
+- The Market: Collect Mail puts a Collect button beside your inbox that takes all your mail, or only
+  sold, bought or expired auctions. Turn it on under My Auctions in The Market's settings.
+- BiS List: each slot's ranking now starts with the level-60 pre-raid pick most lists agree on, and
+  healers get level-60 picks. New List can start from Pre-raid BiS, a ready-made list of those picks
+  for your spec with backups; Naowh Picks is coming soon.
+- QoL > Glimmer > Hide Icon Above Objects removes the floating cog or flower over herbs, ore and
+  your bobber, and keeps Glimmer's effect.
+
+### Changed
+- Map Pins: profession trainers in town show their profession's icon on the map and minimap.
+- Buff Reminders: Righteous Fury now reminds a paladin with Redoubt learned (one point is enough),
+  instead of Improved Righteous Fury.
+- Trinket Bar: shows only the slots you have something equipped in, and hides when you wear none,
+  instead of showing a question mark.
+- Professions: the Recommended and Everything Enabled setups leave Search Favorites AH off. Turn it
+  on in Professions settings.
+- The Market: Dropped and Rose on the Price Graph no longer list gray or white items.
+
+### Fixed
+- BiS List: a BiS Route stop now lists every pick you still need from it, not only the best one per
+  slot.
+- Console Variables: settings the game protects in combat, such as SoftTargetInteract, are now
+  listed and can be pinned.
+- BiS List: Generate BiS List no longer picks rewards from high-level quests that have no required
+  level (Thrash Blade for a level 16), and the picker shows the level you can get them.
+- BiS List: swapping weapons no longer stutters while the generated (Auto) list is the one you use.
+- Stat Weights now counts Fire, Frost, Shadow, Nature, Arcane and Holy Damage on items, so upgrade
+  tooltips no longer miss them. Group Inspect's spell power from gear includes them too.
+- The Market: My Auctions shows an item someone else lists at your exact price as Matched instead of
+  Lowest.
+- Auction Prices: random-suffix gear ("of the Bear", "of the Owl") shows its own variant's auction
+  price on tooltips and in the Loot Feed, instead of the cheapest variant's.
+- Dungeon Journal: Run Panel: going from one Scarlet Monastery wing to the next (or from Lower to
+  Upper Blackrock Spire) starts that wing's own run, so each one finishes and keeps its own best
+  time.
+- Dungeon Journal: Run Panel: a Sunken Temple run finishes without Avatar of Hakkar, who only comes
+  with the Egg of Hakkar quest; he is marked optional.
+- Dungeon Journal: hovering an item no longer opens the comparison tooltips for your equipped gear
+  unless you hold Shift.
+- Dungeon Journal: opening the map inside a dungeon no longer stutters. The page beside it is drawn
+  at the loading screen and kept until something on it changes.
+- Discovery: Alliance characters now count The Lessons of Ta'zo toward the library books.
+- The Market: "Made by", Reagents and the Shopping List now show your alts' surnames, and alts that
+  share your first name show their Shopping Lists again.
 
 ## 1.4.9
 
